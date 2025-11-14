@@ -1,0 +1,41 @@
+.app-container {
+  min-height: 100vh;
+  background-color: #F0F2F5;
+}
+
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #FFFFFF 0%, #F0F2F5 100%);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 24px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.login-title {
+  text-align: center;
+  margin-bottom: 32px;
+  color: #262626;
+  font-weight: 600;
+}
+
+.dashboard-layout {
+  min-height: 100vh;
+  background-color: #F0F2F5;
+}
+
+.dashboard-content {
+  margin: 24px;
+  padding: 24px;
+  background: #FFFFFF;
+  border-radius: 8px;
+  min-height: calc(100vh - 112px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+

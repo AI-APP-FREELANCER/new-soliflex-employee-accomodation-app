@@ -1,0 +1,151 @@
+I need prompt having various stages to build a web app using Ant framework, react for frontend and node.js for backend for APIs. Need an employee quarters management system which is a ERP system for the company called 'Soliflex Packaging'. For now use an Excel sheet as backend tables where 3 work sheets are available 'residence_master' with columns [residence_id	residence_owner_id, residence_owner_name, residence_door_number, residence_address_line_1,	residence_address_line_2,	residence_address_line_3,	residence_state	residence_pin_code,	residence_country,	residence_house_count,	residence_status] residence_id column is the unique key having residence id with the prefix format as 'residence_id_001' and so on incrementing by one for other residence, this sheet also has 'residence_house_count' column that shows how many houses within that property is rented by the company for its identified employees, 'status' column shows the status of the rental facility.
+
+Next sheet is 'agreement_master' and it has columns [agreement_id,	agreement_residence_id	agreement_possesion_date,	agreement_renewal_due_date,	agreement_employee_unit,	agreement_advance_amount,	agreement_monthly_rent_amount,	agreement_status]. Where agreement_id is the unique id column identifying the id of the agreement and follows with prefix as agreement_001 and incremented by 1 for each agreement, 'agreement_residence_id' is the foreign key to link agreement_id against each individual residence_id from residence_master sheet which is exactly the id of the residence. Ideally one residence_id for now has one agreement_id but for future if the residence agreement is extended for next year (11 months contractual agreement by default, some times can be shorter or even longer going by how the agreement is made with the owner).
+
+Next is 'employee_master' worksheet which has these columns [employee_id,	emplyee_allocated_agreement_id,	employee_first_name,	employee_last_name,	employee_sir_name,	employee_department,	employee_designation,	employee_date_of_joining,	employee_status,
+]. 'employee_id' column which is alpha numerical values and unique employee who is assigned a quarters and staying in one of the residences from linked via agreement_id and the foreign key is 'emplyee_allocated_agreement_id'.
+
+I want the app to pick all these columns and information to use them as backend. 
+The Human Resources team should be able to use this application and having an administrator privileges to all members who login.
+The HR team should be able to identify which employee is staying at which property, from when to when.
+When is the next agreement due date per property.
+When is the lease extension date to be notified in advance so the HR team can request Accounts team for processing amount and invoices for monthly rentals payments and management and also be able to add / edit property, agreement and employee information in the system. Remember no one should be able to delete any record but manage the state as active / inactive (applies for residence, agreement and employees).
+Application should manage the cost as well for monthly rental spends, pending invoices for next month, current advance spent and likely to continue next year (prediction of cost).
+If a property is vacated (marked or status changed from active to inactive) then we need to get back the advance amount as well, however same amount may not be received back some percentage will be cut by the land lord for maintenance and then return the rest, we need to input these manually of how much is cut as part of maintenance and rest of the amount returned by the owner back to us.
+We should show all the residence related information as well such as owner name, owner id, address time from start date until now and probale stay to prolong more until next agreement due date.
+agreements can be multiple for any given residence for example residence can be rented from past 3 years and in this case there would be 3 agreements 1 for each year (default) however if the agreement is made for 3 months or 6 months or longer then the due dates should be calculated accordingly.
+'residence_house_count' column from 'residence_master' sheet shows the number of houses in that particular residence property, we can show a cululative split against the advance and rental amount but that may not be the actual value, for now the excel file is does not break down agreement wise cost breakdown it only has the break up as per residence. The app should allow future extensions based on agreements (from dates, to dates, advance amount if required, monthly rent per agreement, add up monthly rents to the total for residence property).
+
+Analytics dashboards downloadable in proper format as pdf, table based downloadable information in excel format, charts to show spends yearly, half yearly, quarterly and monthly. Employee active vs inactive, employee unit and department based breakdowns analytics, wastage of financials if any. Recommendations for optimizing the cost and so on. Now go ahead and give me the prompt in phases so the new AI tool can start to build the application, we should not miss any of the business logic here please. Break down each phase of development in depth and clearly explain and provide the instructions as prompt (effective prompt please).
+
+
+----------------------------------------------------------------------------------
+The following prompts cover the entire scope: Phase 1 (Data Model & Core API), Phase 2 (Frontend Structure & CRUD), and Phase 3 (Financial Logic & Analytics/Reporting).
+
+Phase 1 Prompt: Data Model, Core API Development, and Authentication
+GOAL: Establish the data models based on the Excel sheets and build the foundational Node.js API endpoints for authentication and master data CRUD/State management.
+
+Node.js/Backend Instructions (API & Data Model)
+PROJECT NAME: SoliflexQuartersManager
+
+TECHNOLOGY STACK: Node.js, Express, PostgreSQL (for data modeling).
+
+Data Modeling (Relational Structure): Design three normalized PostgreSQL tables (residence_master, agreement_master, employee_master) that replicate the provided Excel column names and adhere to the established foreign key relationships.
+
+residence_master: Primary Key: residence_id.
+
+employee_master: Primary Key: employee_id.
+
+agreement_master: Primary Key: agreement_id. Foreign Key: agreement_residence_id (links to residence_master.residence_id).
+
+Relationship Focus: Crucially, model the one-to-many relationship where one Residence can have multiple Agreement records (past, present, future).
+
+Status Management: All tables must use the status column (Active / Inactive) instead of physical deletion.
+
+Mock Data Source: Implement a simple data layer that reads and exposes data from the three provided Excel worksheets as in-memory JSON objects to simulate the database until a real PostgreSQL connection is established. The API must treat these JSON objects as the backend source for now.
+
+Authentication & User Model:
+
+Create a simple User Model with fields: user_id, username, password (hashed), and role (default all users to ADMIN as per HR requirements).
+
+Implement login and authentication APIs using JWTs. All subsequent APIs must be protected by this token.
+
+Core CRUD APIs (State Management Focus):
+
+Create RESTful API endpoints (GET, POST, PUT) for all three entities (/residence, /agreement, /employee).
+
+Crucial Rule: No Deletion: The PUT endpoint must only allow updating the status column to Inactive or editing non-key fields. Deletion should be prohibited.
+
+Implement a GET /agreement/active endpoint that returns only the currently active agreement for each property.
+
+React/Frontend Instructions (Setup & Login)
+TECHNOLOGY STACK: React, Ant Design (AntD), Custom CSS.
+
+Project Setup: Initialize the React project with Ant Design loaded.
+
+Login Component: Create a functional login screen that interacts with the Node.js authentication API.
+
+Layout: Implement a professional AntD-based Layout (<Layout>) with a sidebar for navigation (even if empty for now). Ensure a cohesive, professional AntD Dark Theme is applied.
+
+Routing: Set up basic routing using a library like React Router for /login and /dashboard (protected route).
+
+Phase 2 Prompt: Frontend CRUD, Data Visualization, and Business Logic
+GOAL: Build the main functional screens for managing properties, agreements, and employees, including advanced agreement scheduling and user interface elements mandated by the HR team.
+
+React/Frontend Instructions (Main Functionality)
+HR Dashboard Layout: Create a main dashboard with three primary navigation sections: Residences, Agreements, and Employees.
+
+Residences Management Screen:
+
+Display all Active residences in an AntD Table with key details (residence_id, address, owner_name, residence_house_count).
+
+Include a View Details action that opens an AntD Drawer/Modal to show all related Agreements and current Resident(s).
+
+Implement a Create/Edit Form using AntD components to manage property data. (CRUD-U: Create, Update status/data).
+
+Agreement Management Screen (The Core Logic):
+
+Display a table of all agreements (active and past).
+
+Crucial Logic: Due Date Calculation: The Add/Edit Agreement form must automatically calculate and display the agreement_renewal_due_date. This date should be 90 days prior to the actual agreement_end_date (which is typically 11 months after the start date, but must support custom durations).
+
+Renewal Workflow: Provide a "Renew Agreement" button on Active agreements that pre-populates the "Add New Agreement" form with the same residence_id and suggests a start date immediately following the current agreement's end date.
+
+Advance Refund Handling (Vacated Property): When an agreement is marked Inactive due to a property being vacated, a required form must pop up, allowing the HR user to input the Maintenance Cut Amount (the percentage/amount retained by the landlord) and display the final Advance Amount Returned to the company for recording.
+
+Employee Management Screen:
+
+Display all employees in a table.
+
+Include a Create/Edit Form for employee details.
+
+The Edit form must allow linking or changing the emplyee_allocated_agreement_id (Foreign Key).
+
+HR Reporting View (Key Information):
+
+Create a prominent section on the dashboard that immediately answers HR's needs:
+
+Current Occupancy: List Employee Name, Department, Residence Address, and their stay start date (must join Employee and Agreement tables).
+
+Renewal Alert: A dedicated AntD Card component showing properties whose renewal_due_date is approaching (e.g., within the next 60 days).
+
+Phase 3 Prompt: Financial Tracking and Analytics Dashboard
+GOAL: Implement all required financial calculations, predictive cost modeling, and create a comprehensive analytics dashboard with export capabilities.
+
+Node.js/Backend Instructions (Advanced APIs)
+Financial Metrics API: Create a dedicated API (GET /analytics/financial-summary) that returns a single object containing:
+
+Total Current Monthly Spend: Sum of agreement_monthly_rent_amount for all ACTIVE agreements.
+
+Total Current Advance Spent: Sum of agreement_advance_amount for all ACTIVE agreements.
+
+Likely Cost Prediction (Next Year): Calculate the projected annual cost based on the current active monthly rent multiplied by 12, plus the total advance paid for those active properties.
+
+Historical Spend: Total rent paid over a user-specified date range (requires joining Agreement records).
+
+Analytical Breakdown API: Create APIs to support the following data visualizations (returning structured JSON objects suitable for chart/table consumption):
+
+Spend Over Time: Total rental spend aggregated by Yearly, Half-Yearly, Quarterly, and Monthly.
+
+Employee Breakdown: Count of employees categorized by Department and Unit Allocation Status (Active/Inactive).
+
+React/Frontend Instructions (Analytics & Reporting)
+Analytics Dashboard Screen: Create a dedicated Analytics navigation link.
+
+Financial Charts (Using a standard AntD-compatible charting library like ECharts or equivalent):
+
+Chart 1 (Bar Chart): Total Monthly Rent Spend over the last 12 months.
+
+Chart 2 (Pie Chart): Breakdown of Active Employees by Department.
+
+Chart 3 (Line Chart): Yearly Cost Trend comparing the last 3 years of actual spend vs. the likely cost prediction for the current year.
+
+Data Export Functionality:
+
+Implement two buttons on the Analytics Dashboard:
+
+Export PDF: Allow downloading the entire Analytics Dashboard (charts and key summary figures) as a PDF report.
+
+Export Excel: Allow downloading the raw data that feeds the main Residences table and the Agreements table into a formatted Excel sheet.
+
+Cost Optimization Recommendations: Implement an AntD Alert or Card that shows text-based Recommendations for Optimizing Cost (e.g., "Review properties with lowest house count for potential consolidation," "Upcoming high-value renewals"). The logic for these recommendations should be simple, rule-based checks on the backend data.

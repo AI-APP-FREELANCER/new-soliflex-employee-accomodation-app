@@ -1,0 +1,78 @@
+import axios from 'axios';
+
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
+// Create axios instance with default config
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Add token to requests
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Auth APIs
+export const authAPI = {
+  login: (username, password) => api.post('/auth/login', { username, password }),
+  verify: () => api.get('/auth/verify'),
+};
+
+// Residence APIs
+export const residenceAPI = {
+  getAll: () => api.get('/residence'),
+  getById: (id) => api.get(`/residence/${id}`),
+  create: (data) => api.post('/residence', data),
+  update: (id, data) => api.put(`/residence/${id}`, data),
+};
+
+// Agreement APIs
+export const agreementAPI = {
+  getAll: () => api.get('/agreement'),
+  getActive: () => api.get('/agreement/active'),
+  getById: (id) => api.get(`/agreement/${id}`),
+  getByResidence: (residenceId) => api.get(`/agreement/residence/${residenceId}`),
+  create: (data) => api.post('/agreement', data),
+  update: (id, data) => api.put(`/agreement/${id}`, data),
+};
+
+// Employee APIs
+export const employeeAPI = {
+  getAll: () => api.get('/employee'),
+  getById: (id) => api.get(`/employee/${id}`),
+  create: (data) => api.post('/employee', data),
+  update: (id, data) => api.put(`/employee/${id}`, data),
+};
+
+// Analytics/Reporting APIs
+export const analyticsAPI = {
+  getOccupancy: () => api.get('/analytics/occupancy'),
+  getOccupancyRate: () => api.get('/analytics/occupancy-rate'),
+  getEmployeeStatus: () => api.get('/analytics/employee-status'),
+  getRenewalAlerts: (days = 60) => api.get(`/analytics/renewal-alerts?days=${days}`),
+  getFinancialSummary: (startDate, endDate) => {
+    const params = {};
+    if (startDate) params.startDate = startDate;
+    if (endDate) params.endDate = endDate;
+    return api.get('/analytics/financial-summary', { params });
+  },
+  getSpendOverTime: (period = 'monthly') => api.get(`/analytics/spend-over-time?period=${period}`),
+  getEmployeeBreakdown: () => api.get('/analytics/employee-breakdown'),
+  getDepartmentRentCost: () => api.get('/analytics/department-rent-cost'),
+  getCostOptimizationRecommendations: () => api.get('/analytics/cost-optimization-recommendations'),
+};
+
+export default api;
+
