@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Table,
   Button,
@@ -11,12 +11,16 @@ import {
   message,
   Tag,
   Typography,
+  Dropdown,
+  Card,
 } from 'antd';
-import { PlusOutlined, EditOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined } from '@ant-design/icons';
 import { employeeAPI, agreementAPI } from '../services/api';
+import { exportToPDF, exportTableToExcel } from '../utils/exportUtils';
+import { formatDateForDisplay, formatDateForAPI, parseDateFromAPI, getMinDate, getMaxDate } from '../utils/dateUtils';
 import dayjs from 'dayjs';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 const { Option } = Select;
 
 const Employees = () => {
@@ -26,7 +30,20 @@ const Employees = () => {
   const [formVisible, setFormVisible] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [pageSize, setPageSize] = useState(10);
+  const [searchText, setSearchText] = useState('');
+  const [isMobile, setIsMobile] = useState(false);
   const [form] = Form.useForm();
+  const tableRef = useRef(null);
+
+  // Responsive detection
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     fetchEmployees();
@@ -64,7 +81,7 @@ const Employees = () => {
   const handleEdit = (record) => {
     form.setFieldsValue({
       ...record,
-      employee_date_of_joining: record.employee_date_of_joining ? dayjs(record.employee_date_of_joining) : null,
+      employee_date_of_joining: record.employee_date_of_joining ? parseDateFromAPI(record.employee_date_of_joining) : null,
     });
     setSelectedEmployee(record);
     setFormVisible(true);
@@ -73,7 +90,7 @@ const Employees = () => {
   const handleSubmit = async (values) => {
     try {
       if (values.employee_date_of_joining) {
-        values.employee_date_of_joining = values.employee_date_of_joining.format('YYYY-MM-DD');
+        values.employee_date_of_joining = formatDateForAPI(values.employee_date_of_joining);
       }
 
       if (selectedEmployee) {
@@ -89,6 +106,96 @@ const Employees = () => {
     } catch (error) {
       message.error(error.response?.data?.error || 'Failed to save employee');
       console.error(error);
+    }
+  };
+
+  // Filter employees based on search text
+  // CRITICAL: Always filter from the MASTER employee list to prevent result persistence
+  const filteredEmployees = useMemo(() => {
+    // Get the master list - this is the source of truth, never filtered data
+    const MASTER_EMPLOYEE_LIST = employees;
+    
+    // If search is empty, return the complete master list
+    if (!searchText || !searchText.trim()) {
+      return MASTER_EMPLOYEE_LIST;
+    }
+
+    // Always start filtering from the absolute MASTER list (never from previously filtered results)
+    const lowerSearch = searchText.toLowerCase().trim();
+    
+    const results = MASTER_EMPLOYEE_LIST.filter(employee => {
+      const employeeId = (employee.employee_id || '').toLowerCase();
+      const firstName = (employee.employee_first_name || '').toLowerCase();
+      const lastName = (employee.employee_last_name || '').toLowerCase();
+      const sirName = (employee.employee_sir_name || '').toLowerCase();
+      const fullName = `${firstName} ${lastName} ${sirName}`.trim().toLowerCase();
+      const department = (employee.employee_department || '').toLowerCase();
+      const designation = (employee.employee_designation || '').toLowerCase();
+
+      return (
+        employeeId.includes(lowerSearch) ||
+        firstName.includes(lowerSearch) ||
+        lastName.includes(lowerSearch) ||
+        sirName.includes(lowerSearch) ||
+        fullName.includes(lowerSearch) ||
+        department.includes(lowerSearch) ||
+        designation.includes(lowerSearch)
+      );
+    });
+
+    // Completely replace the displayed list with the new results (no additive effect)
+    return results;
+  }, [searchText, employees]);
+
+  // Export handlers
+  const handleExportPDF = async () => {
+    try {
+      message.loading({ content: 'Generating PDF...', key: 'export' });
+      await exportToPDF(tableRef, `Employees_${dayjs().format('YYYY-MM-DD')}.pdf`);
+      message.success({ content: 'PDF exported successfully!', key: 'export' });
+    } catch (error) {
+      message.error({ content: 'Failed to export PDF', key: 'export' });
+      console.error(error);
+    }
+  };
+
+  const handleExportExcel = () => {
+    try {
+      message.loading({ content: 'Generating Excel...', key: 'export' });
+      
+      const exportData = filteredEmployees.map(e => {
+        const nameParts = [
+          e.employee_first_name,
+          e.employee_last_name,
+          e.employee_sir_name,
+        ].filter(Boolean);
+        return {
+          'Employee ID': e.employee_id || '',
+          'First Name': e.employee_first_name || '',
+          'Last Name': e.employee_last_name || '',
+          'Sir Name': e.employee_sir_name || '',
+          'Full Name': nameParts.join(' ') || '',
+          'Department': e.employee_department || '',
+          'Designation': e.employee_designation || '',
+          'Date of Joining': e.employee_date_of_joining || '',
+          'Allocated Agreement ID': e.emplyee_allocated_agreement_id || 'Not Assigned',
+          'Status': e.employee_status || '',
+        };
+      });
+
+      exportTableToExcel(exportData, 'Employees', `Employees_${dayjs().format('YYYY-MM-DD')}.xlsx`);
+      message.success({ content: 'Excel exported successfully!', key: 'export' });
+    } catch (error) {
+      message.error({ content: 'Failed to export Excel', key: 'export' });
+      console.error(error);
+    }
+  };
+
+  const handleExportMenuClick = ({ key }) => {
+    if (key === 'pdf') {
+      handleExportPDF();
+    } else if (key === 'excel') {
+      handleExportExcel();
     }
   };
 
@@ -124,7 +231,7 @@ const Employees = () => {
       title: 'Date of Joining',
       dataIndex: 'employee_date_of_joining',
       key: 'employee_date_of_joining',
-      render: (date) => date || 'N/A',
+      render: (date) => date ? formatDateForDisplay(date) : 'N/A',
     },
     {
       title: 'Allocated Agreement',
@@ -164,41 +271,153 @@ const Employees = () => {
     a => a.agreement_status === 'Active' || a.agreement_status === 'active'
   );
 
+  const exportMenuItems = [
+    {
+      key: 'pdf',
+      label: 'Download as PDF',
+      icon: <FilePdfOutlined />,
+    },
+    {
+      key: 'excel',
+      label: 'Download as Excel',
+      icon: <FileExcelOutlined />,
+    },
+  ];
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
-        <Title level={2} style={{ color: '#262626', margin: 0 }}>
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: isMobile ? 'column' : 'row',
+        justifyContent: 'space-between', 
+        marginBottom: '24px',
+        gap: isMobile ? '16px' : 0,
+      }}>
+        <Title level={2} style={{ color: '#262626', margin: 0, fontSize: isMobile ? '20px' : '24px' }}>
           Employees Management
         </Title>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={handleAdd}
-        >
-          Add Employee
-        </Button>
+        <Space direction={isMobile ? 'vertical' : 'horizontal'} style={{ width: isMobile ? '100%' : 'auto' }}>
+          <Dropdown menu={{ items: exportMenuItems, onClick: handleExportMenuClick }}>
+            <Button icon={<DownloadOutlined />} block={isMobile}>
+              Download
+            </Button>
+          </Dropdown>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={handleAdd}
+            block={isMobile}
+          >
+            Add Employee
+          </Button>
+        </Space>
       </div>
 
-      <Table
-        columns={columns}
-        dataSource={employees}
-        loading={loading}
-        rowKey="employee_id"
-        pagination={{
-          pageSize: pageSize,
-          showSizeChanger: true,
-          pageSizeOptions: ['10', '25', '50', '100'],
-          onShowSizeChange: (current, size) => {
-            setPageSize(size);
-          },
-        }}
-      />
+      <div style={{ marginBottom: '16px' }}>
+        <Input
+          placeholder="Search by Employee ID, Name, Department, or Designation..."
+          prefix={<SearchOutlined />}
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          allowClear
+          style={{ width: isMobile ? '100%' : '400px' }}
+        />
+      </div>
+
+      <div ref={tableRef}>
+        {isMobile ? (
+          // Mobile Card View
+          <div>
+            {filteredEmployees.map((employee) => {
+              const fullName = [
+                employee.employee_first_name,
+                employee.employee_last_name,
+                employee.employee_sir_name,
+              ].filter(Boolean).join(' ') || 'N/A';
+              return (
+                <Card
+                  key={employee.employee_id}
+                  style={{ marginBottom: '16px' }}
+                  actions={[
+                    <Button
+                      key="edit"
+                      type="link"
+                      icon={<EditOutlined />}
+                      onClick={() => handleEdit(employee)}
+                      block
+                    >
+                      Edit
+                    </Button>,
+                  ]}
+                >
+                  <Space direction="vertical" style={{ width: '100%' }} size="small">
+                    <div>
+                      <Text strong>Employee ID: </Text>
+                      <Text>{employee.employee_id}</Text>
+                    </div>
+                    <div>
+                      <Text strong>Name: </Text>
+                      <Text>{fullName}</Text>
+                    </div>
+                    <div>
+                      <Text strong>Department: </Text>
+                      <Text>{employee.employee_department || 'N/A'}</Text>
+                    </div>
+                    <div>
+                      <Text strong>Designation: </Text>
+                      <Text>{employee.employee_designation || 'N/A'}</Text>
+                    </div>
+                    <div>
+                      <Text strong>Date of Joining: </Text>
+                      <Text>{formatDateForDisplay(employee.employee_date_of_joining) || 'N/A'}</Text>
+                    </div>
+                    <div>
+                      <Text strong>Allocated Agreement: </Text>
+                      <Text>{employee.emplyee_allocated_agreement_id || 'Not Assigned'}</Text>
+                    </div>
+                    <div>
+                      <Text strong>Status: </Text>
+                      <Tag color={employee.employee_status === 'Active' ? 'green' : 'red'}>
+                        {employee.employee_status}
+                      </Tag>
+                    </div>
+                  </Space>
+                </Card>
+              );
+            })}
+            {filteredEmployees.length === 0 && !loading && (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#8c8c8c' }}>
+                No employees found
+              </div>
+            )}
+          </div>
+        ) : (
+          // Desktop Table View
+          <div style={{ overflowX: 'auto' }}>
+            <Table
+              columns={columns}
+              dataSource={filteredEmployees}
+              loading={loading}
+              rowKey="employee_id"
+              scroll={{ x: 'max-content' }}
+              pagination={{
+                pageSize: pageSize,
+                showSizeChanger: true,
+                pageSizeOptions: ['10', '25', '50', '100'],
+                onShowSizeChange: (current, size) => {
+                  setPageSize(size);
+                },
+              }}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Create/Edit Form Drawer */}
       <Drawer
         title={selectedEmployee ? 'Edit Employee' : 'Add Employee'}
         placement="right"
-        width={500}
+        width={isMobile ? '100%' : 500}
         onClose={() => {
           setFormVisible(false);
           form.resetFields();
@@ -258,9 +477,28 @@ const Employees = () => {
 
           <Form.Item
             name="employee_date_of_joining"
-            label="Date of Joining"
+            label="Date of Joining (DD-MM-YYYY)"
+            rules={[
+              {
+                validator: (_, value) => {
+                  if (!value) return Promise.resolve();
+                  const year = value.year();
+                  if (year < 2023 || year > 2100) {
+                    return Promise.reject(new Error('Date must be between 2023 and 2100'));
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
           >
-            <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+            <DatePicker 
+              style={{ width: '100%' }} 
+              format="DD-MM-YYYY"
+              disabledDate={(current) => {
+                if (!current) return false;
+                return current.isBefore(getMinDate(), 'day') || current.isAfter(getMaxDate(), 'day');
+              }}
+            />
           </Form.Item>
 
           <Form.Item

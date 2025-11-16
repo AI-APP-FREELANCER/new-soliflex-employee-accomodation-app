@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Table,
   Button,
@@ -13,11 +13,17 @@ import {
   Typography,
   Card,
   Descriptions,
+  Dropdown,
+  Row,
+  Col,
 } from 'antd';
-import { PlusOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, EyeOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined } from '@ant-design/icons';
 import { residenceAPI, agreementAPI, employeeAPI } from '../services/api';
+import { exportToPDF, exportTableToExcel } from '../utils/exportUtils';
+import { formatDateForDisplay } from '../utils/dateUtils';
+import dayjs from 'dayjs';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 const { Option } = Select;
 
 const Residences = () => {
@@ -29,7 +35,20 @@ const Residences = () => {
   const [agreements, setAgreements] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [pageSize, setPageSize] = useState(10);
+  const [searchText, setSearchText] = useState('');
+  const [isMobile, setIsMobile] = useState(false);
   const [form] = Form.useForm();
+  const tableRef = useRef(null);
+
+  // Responsive detection
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     fetchResidences();
@@ -114,6 +133,91 @@ const Residences = () => {
     }
   };
 
+  // Filter residences based on search text
+  const filteredResidences = useMemo(() => {
+    if (!searchText.trim()) {
+      return residences;
+    }
+
+    const lowerSearch = searchText.toLowerCase().trim();
+    const searchTerms = lowerSearch.split(/\s+/); // Split by spaces for combined search
+
+    return residences.filter(residence => {
+      const ownerName = (residence.residence_owner_name || '').toLowerCase();
+      const residenceId = (residence.residence_id || '').toLowerCase();
+      const addressLine2 = (residence.residence_address_line_2 || '').toLowerCase();
+      const addressLine1 = (residence.residence_address_line_1 || '').toLowerCase();
+      const addressLine3 = (residence.residence_address_line_3 || '').toLowerCase();
+
+      // If multiple terms, all must match somewhere
+      if (searchTerms.length > 1) {
+        return searchTerms.every(term => 
+          ownerName.includes(term) ||
+          residenceId.includes(term) ||
+          addressLine2.includes(term) ||
+          addressLine1.includes(term) ||
+          addressLine3.includes(term)
+        );
+      }
+
+      // Single term search - match any field
+      return (
+        ownerName.includes(lowerSearch) ||
+        residenceId.includes(lowerSearch) ||
+        addressLine2.includes(lowerSearch) ||
+        addressLine1.includes(lowerSearch) ||
+        addressLine3.includes(lowerSearch)
+      );
+    });
+  }, [searchText, residences]);
+
+  // Export handlers
+  const handleExportPDF = async () => {
+    try {
+      message.loading({ content: 'Generating PDF...', key: 'export' });
+      await exportToPDF(tableRef, `Residences_${dayjs().format('YYYY-MM-DD')}.pdf`);
+      message.success({ content: 'PDF exported successfully!', key: 'export' });
+    } catch (error) {
+      message.error({ content: 'Failed to export PDF', key: 'export' });
+      console.error(error);
+    }
+  };
+
+  const handleExportExcel = () => {
+    try {
+      message.loading({ content: 'Generating Excel...', key: 'export' });
+      
+      const exportData = filteredResidences.map(r => ({
+        'Residence ID': r.residence_id || '',
+        'Owner ID': r.residence_owner_id || '',
+        'Owner Name': r.residence_owner_name || '',
+        'Door Number': r.residence_door_number || '',
+        'Address Line 1': r.residence_address_line_1 || '',
+        'Address Line 2': r.residence_address_line_2 || '',
+        'Address Line 3': r.residence_address_line_3 || '',
+        'State': r.residence_state || '',
+        'PIN Code': r.residence_pin_code || '',
+        'Country': r.residence_country || '',
+        'House Count': r.residence_house_count || 0,
+        'Status': r.residence_status || '',
+      }));
+
+      exportTableToExcel(exportData, 'Residences', `Residences_${dayjs().format('YYYY-MM-DD')}.xlsx`);
+      message.success({ content: 'Excel exported successfully!', key: 'export' });
+    } catch (error) {
+      message.error({ content: 'Failed to export Excel', key: 'export' });
+      console.error(error);
+    }
+  };
+
+  const handleExportMenuClick = ({ key }) => {
+    if (key === 'pdf') {
+      handleExportPDF();
+    } else if (key === 'excel') {
+      handleExportExcel();
+    }
+  };
+
   const columns = [
     {
       title: 'Residence ID',
@@ -176,41 +280,154 @@ const Residences = () => {
     },
   ];
 
+  const exportMenuItems = [
+    {
+      key: 'pdf',
+      label: 'Download as PDF',
+      icon: <FilePdfOutlined />,
+    },
+    {
+      key: 'excel',
+      label: 'Download as Excel',
+      icon: <FileExcelOutlined />,
+    },
+  ];
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
-        <Title level={2} style={{ color: '#262626', margin: 0 }}>
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: isMobile ? 'column' : 'row',
+        justifyContent: 'space-between', 
+        marginBottom: '24px',
+        gap: isMobile ? '16px' : 0,
+      }}>
+        <Title level={2} style={{ color: '#262626', margin: 0, fontSize: isMobile ? '20px' : '24px' }}>
           Residences Management
         </Title>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={handleAdd}
-        >
-          Add Residence
-        </Button>
+        <Space direction={isMobile ? 'vertical' : 'horizontal'} style={{ width: isMobile ? '100%' : 'auto' }}>
+          <Dropdown menu={{ items: exportMenuItems, onClick: handleExportMenuClick }}>
+            <Button icon={<DownloadOutlined />} block={isMobile}>
+              Download
+            </Button>
+          </Dropdown>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={handleAdd}
+            block={isMobile}
+          >
+            Add Residence
+          </Button>
+        </Space>
       </div>
 
-      <Table
-        columns={columns}
-        dataSource={residences}
-        loading={loading}
-        rowKey="residence_id"
-        pagination={{
-          pageSize: pageSize,
-          showSizeChanger: true,
-          pageSizeOptions: ['10', '25', '50', '100'],
-          onShowSizeChange: (current, size) => {
-            setPageSize(size);
-          },
-        }}
-      />
+      <div style={{ marginBottom: '16px' }}>
+        <Input
+          placeholder="Search by Owner Name, Residence ID, or Address..."
+          prefix={<SearchOutlined />}
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          allowClear
+          style={{ width: isMobile ? '100%' : '400px' }}
+        />
+      </div>
+
+      <div ref={tableRef}>
+        {isMobile ? (
+          // Mobile Card View
+          <div>
+            {filteredResidences.map((residence) => {
+              const addressParts = [
+                residence.residence_address_line_1,
+                residence.residence_address_line_2,
+                residence.residence_address_line_3,
+              ].filter(Boolean);
+              return (
+                <Card
+                  key={residence.residence_id}
+                  style={{ marginBottom: '16px' }}
+                  actions={[
+                    <Button
+                      key="view"
+                      type="link"
+                      icon={<EyeOutlined />}
+                      onClick={() => handleViewDetails(residence)}
+                      block
+                    >
+                      View Details
+                    </Button>,
+                    <Button
+                      key="edit"
+                      type="link"
+                      icon={<EditOutlined />}
+                      onClick={() => handleEdit(residence)}
+                      block
+                    >
+                      Edit
+                    </Button>,
+                  ]}
+                >
+                  <Space direction="vertical" style={{ width: '100%' }} size="small">
+                    <div>
+                      <Text strong>Residence ID: </Text>
+                      <Text>{residence.residence_id}</Text>
+                    </div>
+                    <div>
+                      <Text strong>Owner: </Text>
+                      <Text>{residence.residence_owner_name || 'N/A'}</Text>
+                    </div>
+                    <div>
+                      <Text strong>Address: </Text>
+                      <Text>{addressParts.join(', ') || 'N/A'}</Text>
+                    </div>
+                    <div>
+                      <Text strong>House Count: </Text>
+                      <Text>{residence.residence_house_count || 0}</Text>
+                    </div>
+                    <div>
+                      <Text strong>Status: </Text>
+                      <Tag color={residence.residence_status === 'Active' ? 'green' : 'red'}>
+                        {residence.residence_status}
+                      </Tag>
+                    </div>
+                  </Space>
+                </Card>
+              );
+            })}
+            {filteredResidences.length === 0 && !loading && (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#8c8c8c' }}>
+                No residences found
+              </div>
+            )}
+          </div>
+        ) : (
+          // Desktop Table View
+          <div style={{ overflowX: 'auto' }}>
+            <Table
+              columns={columns}
+              dataSource={filteredResidences}
+              loading={loading}
+              rowKey="residence_id"
+              scroll={{ x: 'max-content' }}
+              pagination={{
+                pageSize: pageSize,
+                showSizeChanger: true,
+                pageSizeOptions: ['10', '25', '50', '100'],
+                onShowSizeChange: (current, size) => {
+                  setPageSize(size);
+                },
+              }}
+            />
+          </div>
+        )}
+      </div>
 
       {/* View Details Drawer */}
       <Drawer
         title="Residence Details"
         placement="right"
-        width={600}
+        width={isMobile ? '100%' : 600}
         onClose={() => setDrawerVisible(false)}
         open={drawerVisible}
       >
@@ -274,10 +491,10 @@ const Residences = () => {
                         </Tag>
                       </Descriptions.Item>
                       <Descriptions.Item label="Possession Date">
-                        {agreement.agreement_possesion_date || 'N/A'}
+                        {formatDateForDisplay(agreement.agreement_possesion_date)}
                       </Descriptions.Item>
                       <Descriptions.Item label="Renewal Due Date">
-                        {agreement.agreement_renewal_due_date || 'N/A'}
+                        {formatDateForDisplay(agreement.agreement_renewal_due_date)}
                       </Descriptions.Item>
                       <Descriptions.Item label="Monthly Rent">
                         ₹{agreement.agreement_monthly_rent_amount || 0}

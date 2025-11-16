@@ -39,3 +39,38 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
+/* Responsive Styles */
+@media (max-width: 768px) {
+  .dashboard-content {
+    margin: 16px;
+    padding: 16px;
+    min-height: calc(100vh - 80px);
+  }
+}
+
+/* Prevent horizontal scroll on mobile */
+@media (max-width: 768px) {
+  body {
+    overflow-x: hidden;
+  }
+  
+  .ant-layout-content {
+    overflow-x: hidden;
+  }
+}
+
+/* Chart container responsive */
+@media (max-width: 768px) {
+  .ant-card-body {
+    padding: 12px;
+  }
+}
+
+/* Large screen optimizations */
+@media (min-width: 1920px) {
+  .dashboard-content {
+    max-width: 1800px;
+    margin: 24px auto;
+  }
+}
+
