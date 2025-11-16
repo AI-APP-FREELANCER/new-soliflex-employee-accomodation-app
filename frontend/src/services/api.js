@@ -1,6 +1,26 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+// Dynamically determine API URL based on current host
+// If running on same domain, use relative path; otherwise use localhost for development
+const getApiBaseUrl = () => {
+  // Check if we have an explicit API URL in environment
+  if (process.env.REACT_APP_API_URL) {
+    return process.env.REACT_APP_API_URL;
+  }
+  
+  // If running in production (same domain), use relative path
+  // This works when frontend and backend are on same server
+  if (process.env.NODE_ENV === 'production') {
+    // Use same hostname and port 5000 for backend
+    const hostname = window.location.hostname;
+    return `http://${hostname}:5000/api`;
+  }
+  
+  // Development fallback
+  return 'http://localhost:5000/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 // Create axios instance with default config
 const api = axios.create({
