@@ -26,7 +26,7 @@ module.exports = {
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
-        PORT: 3000
+        PORT: 3600
       },
       error_file: './logs/frontend-error.log',
       out_file: './logs/frontend-out.log',

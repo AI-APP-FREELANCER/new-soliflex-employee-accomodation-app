@@ -24,31 +24,21 @@ echo -e "${YELLOW}1. Current PM2 processes:${NC}"
 pm2 list
 echo ""
 
-# 2. Check what's using port 3000
-echo -e "${YELLOW}2. Checking what's using port 3000:${NC}"
-PORT_3000_PID=$(sudo lsof -ti :3000 2>/dev/null || echo "")
-if [ -z "$PORT_3000_PID" ]; then
-    echo -e "${GREEN}✓ Port 3000 is free${NC}"
+# 2. Check what's using port 3600 (frontend)
+echo -e "${YELLOW}2. Checking what's using port 3600 (frontend):${NC}"
+PORT_3600_PID=$(sudo lsof -ti :3600 2>/dev/null || echo "")
+if [ -z "$PORT_3600_PID" ]; then
+    echo -e "${GREEN}✓ Port 3600 is free${NC}"
 else
-    echo -e "${YELLOW}Port 3000 is used by PID: $PORT_3000_PID${NC}"
+    echo -e "${YELLOW}Port 3600 is used by PID: $PORT_3600_PID${NC}"
     
     # Check if it's a PM2 process
-    PM2_PROCESS=$(pm2 jlist | jq -r ".[] | select(.pid == $PORT_3000_PID) | .name" 2>/dev/null || echo "")
+    PM2_PROCESS=$(pm2 jlist | jq -r ".[] | select(.pid == $PORT_3600_PID) | .name" 2>/dev/null || echo "")
     
     if [ -n "$PM2_PROCESS" ]; then
         echo -e "${YELLOW}  This is PM2 process: $PM2_PROCESS${NC}"
         if [ "$PM2_PROCESS" = "sol-emp-frontend" ]; then
             echo -e "${GREEN}  → This is our process, will restart it${NC}"
-        elif [ "$PM2_PROCESS" = "soliflex-frontend" ]; then
-            echo -e "${RED}  ⚠ This is the OTHER app (soliflex-frontend)${NC}"
-            echo -e "${YELLOW}  → Checking if soliflex-frontend should be on port 3000...${NC}"
-            # Check soliflex-frontend config
-            SOLIFLEX_PORT=$(pm2 jlist | jq -r ".[] | select(.name == \"soliflex-frontend\") | .pm2_env.env.PORT" 2>/dev/null || echo "")
-            if [ "$SOLIFLEX_PORT" = "3000" ]; then
-                echo -e "${RED}  ✗ CONFLICT: soliflex-frontend is also configured for port 3000!${NC}"
-                echo -e "${YELLOW}  → soliflex-frontend should use port 8081, not 3000${NC}"
-                echo -e "${YELLOW}  → You need to fix soliflex-frontend configuration${NC}"
-            fi
         else
             echo -e "${YELLOW}  → Unknown PM2 process, will handle carefully${NC}"
         fi
@@ -84,18 +74,18 @@ pm2 delete sol-emp-backend 2>/dev/null || echo -e "${YELLOW}  sol-emp-backend no
 pm2 delete sol-emp-frontend 2>/dev/null || echo -e "${YELLOW}  sol-emp-frontend not found${NC}"
 echo ""
 
-# 6. Kill any orphaned processes on port 3000 that belong to sol-emp
+# 6. Kill any orphaned processes on port 3600 that belong to sol-emp
 echo -e "${YELLOW}6. Checking for orphaned processes...${NC}"
-if [ -n "$PORT_3000_PID" ]; then
+if [ -n "$PORT_3600_PID" ]; then
     # Check if it's a sol-emp process by checking the command
-    PROCESS_CMD=$(ps -p $PORT_3000_PID -o cmd= 2>/dev/null || echo "")
+    PROCESS_CMD=$(ps -p $PORT_3600_PID -o cmd= 2>/dev/null || echo "")
     if echo "$PROCESS_CMD" | grep -q "sol-emp\|accomodation"; then
-        echo -e "${YELLOW}  Found orphaned sol-emp process on port 3000 (PID: $PORT_3000_PID)${NC}"
+        echo -e "${YELLOW}  Found orphaned sol-emp process on port 3600 (PID: $PORT_3600_PID)${NC}"
         echo -e "${YELLOW}  Killing orphaned process...${NC}"
-        sudo kill -9 $PORT_3000_PID 2>/dev/null || true
+        sudo kill -9 $PORT_3600_PID 2>/dev/null || true
         sleep 1
     else
-        echo -e "${GREEN}  Process on port 3000 is not sol-emp related, leaving it alone${NC}"
+        echo -e "${GREEN}  Process on port 3600 is not sol-emp related, leaving it alone${NC}"
     fi
 fi
 
@@ -143,9 +133,9 @@ pm2 list
 
 echo ""
 echo -e "${YELLOW}Port Status:${NC}"
-echo -e "Port 3000:"
-sudo lsof -i :3000 2>/dev/null | head -2 || echo -e "${GREEN}  Free${NC}"
-echo -e "Port 5000:"
+echo -e "Port 3600 (Frontend):"
+sudo lsof -i :3600 2>/dev/null | head -2 || echo -e "${GREEN}  Free${NC}"
+echo -e "Port 5000 (Backend):"
 sudo lsof -i :5000 2>/dev/null | head -2 || echo -e "${GREEN}  Free${NC}"
 
 echo ""

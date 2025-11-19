@@ -17,7 +17,7 @@ NC='\033[0m' # No Color
 # Configuration
 APP_DIR="/home/soliflexuser/accomodation/sol-emp-accomodation"
 BACKEND_PORT=5000
-FRONTEND_PORT=3000
+FRONTEND_PORT=3600
 
 echo -e "${YELLOW}🔄 Refreshing Soliflex Accommodation App...${NC}"
 echo ""

@@ -20,7 +20,7 @@ NC='\033[0m' # No Color
 REPO_URL="https://github.com/AI-APP-FREELANCER/new-soliflex-employee-accomodation-app.git"
 APP_DIR="/home/soliflexuser/accomodation/sol-emp-accomodation"
 BACKEND_PORT=5000
-FRONTEND_PORT=3000
+FRONTEND_PORT=3600
 
 echo -e "${YELLOW}Step 1: Checking prerequisites...${NC}"
 

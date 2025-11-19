@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 BACKEND_PORT=5000
-FRONTEND_PORT=3000
+FRONTEND_PORT=3600
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}Port Diagnostic Tool${NC}"

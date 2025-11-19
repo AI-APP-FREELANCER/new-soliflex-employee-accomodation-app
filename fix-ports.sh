@@ -2,7 +2,7 @@
 
 # ============================================
 # Fix Port Configuration for PM2 Hosting
-# Ensures frontend (3000) and backend (5000) are properly configured
+# Ensures frontend (3600) and backend (5000) are properly configured
 # ============================================
 
 set -e
@@ -48,7 +48,7 @@ fi
 # 3. Check ecosystem.config.js
 echo ""
 echo -e "${YELLOW}3. Checking ecosystem.config.js...${NC}"
-if grep -q "PORT: 5000" ecosystem.config.js && grep -q "PORT: 3000" ecosystem.config.js; then
+if grep -q "PORT: 5000" ecosystem.config.js && grep -q "PORT: 3600" ecosystem.config.js; then
     echo -e "${GREEN}✓ PM2 ecosystem config has correct ports${NC}"
 else
     echo -e "${RED}✗ PM2 ecosystem config needs port fixes${NC}"
@@ -112,12 +112,12 @@ else
 fi
 
 echo ""
-echo -e "Port 3000 (Frontend):"
-if sudo ss -tuln | grep -q ":3000 "; then
-    echo -e "${GREEN}✓ Port 3000 is listening${NC}"
-    sudo ss -tuln | grep ":3000 "
+echo -e "Port 3600 (Frontend):"
+if sudo ss -tuln | grep -q ":3600 "; then
+    echo -e "${GREEN}✓ Port 3600 is listening${NC}"
+    sudo ss -tuln | grep ":3600 "
 else
-    echo -e "${RED}✗ Port 3000 is NOT listening${NC}"
+    echo -e "${RED}✗ Port 3600 is NOT listening${NC}"
 fi
 
 # 12. Test connectivity
@@ -134,12 +134,12 @@ else
 fi
 
 echo ""
-echo -e "Testing Frontend (port 3000):"
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 | grep -q "200\|301\|302"; then
+echo -e "Testing Frontend (port 3600):"
+if curl -s -o /dev/null -w "%{http_code}" http://localhost:3600 | grep -q "200\|301\|302"; then
     echo -e "${GREEN}✓ Frontend is responding${NC}"
 else
     echo -e "${RED}✗ Frontend is NOT responding${NC}"
-    curl -v http://localhost:3000 2>&1 | head -5
+    curl -v http://localhost:3600 2>&1 | head -5
 fi
 
 echo ""
@@ -148,7 +148,7 @@ echo -e "${GREEN}Configuration Complete!${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "Backend: ${GREEN}http://$PRIVATE_IP:5000${NC}"
-echo -e "Frontend: ${GREEN}http://$PRIVATE_IP:3000${NC}"
+echo -e "Frontend: ${GREEN}http://$PRIVATE_IP:3600${NC}"
 echo ""
 echo -e "Check logs: ${YELLOW}pm2 logs${NC}"
 echo ""
