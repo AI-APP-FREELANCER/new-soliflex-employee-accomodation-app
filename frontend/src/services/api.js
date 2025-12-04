@@ -1,19 +1,19 @@
 import axios from 'axios';
 
 // Dynamically determine API URL based on current host
-// If running on same domain, use relative path; otherwise use localhost for development
+// Use relative paths when behind nginx proxy, or explicit URL for direct access
 const getApiBaseUrl = () => {
   // Check if we have an explicit API URL in environment
   if (process.env.REACT_APP_API_URL) {
     return process.env.REACT_APP_API_URL;
   }
   
-  // If running in production (same domain), use relative path
-  // This works when frontend and backend are on same server
+  // If running in production (behind nginx), use relative path
+  // This works when nginx proxies /api/* to backend
   if (process.env.NODE_ENV === 'production') {
-    // Use same hostname and port 5000 for backend
-    const hostname = window.location.hostname;
-    return `http://${hostname}:5000/api`;
+    // Use relative path - nginx will handle routing to backend
+    // This ensures HTTPS is maintained and no mixed content issues
+    return '/api';
   }
   
   // Development fallback
