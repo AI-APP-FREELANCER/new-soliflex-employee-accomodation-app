@@ -37,11 +37,13 @@ dayjs.tz.setDefault('Asia/Kolkata');
 import { analyticsAPI, residenceAPI, agreementAPI, employeeAPI } from '../services/api';
 import { exportChartsToPDF, exportMultipleSheetsToExcel } from '../utils/exportUtils';
 import { formatDateForDisplay, parseDateFromAPI } from '../utils/dateUtils';
+import { useResponsive } from '../utils/useResponsive';
 
 const { Title, Paragraph } = Typography;
 const { RangePicker } = DatePicker;
 
 const DashboardHome = ({ onNavigateToAgreements }) => {
+  const responsive = useResponsive();
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState({
     totalProperties: 0,
@@ -1884,16 +1886,16 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
     <div ref={dashboardRef}>
       <Spin spinning={loading}>
         {/* Timeline Filter and Export Controls */}
-        <Card style={{ marginBottom: '24px' }}>
+        <Card style={{ marginBottom: responsive.isMobile ? '16px' : '24px' }}>
           <Row gutter={[16, 16]} align="middle">
             <Col xs={24} sm={24} md={16} lg={16}>
               <Space direction="vertical" style={{ width: '100%' }}>
-                <Title level={5} style={{ margin: 0, fontSize: '14px' }}>Filter by Timeline:</Title>
+                <Title level={5} style={{ margin: 0, fontSize: responsive.isMobile ? '12px' : '14px' }}>Filter by Timeline:</Title>
                 <Radio.Group 
                   value={timelineFilterType}
                   onChange={handleTimelineChange}
                   buttonStyle="solid"
-                  size="small"
+                  size={responsive.isMobile ? 'small' : 'middle'}
                 >
                   <Radio.Button value="all">All Time</Radio.Button>
                   <Radio.Button value="30days">Last 30 Days</Radio.Button>
@@ -1907,14 +1909,18 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                     onChange={handleCustomDateRangeChange}
                     format="DD-MM-YYYY"
                     style={{ marginTop: '8px', width: '100%' }}
-                    size="small"
+                    size={responsive.isMobile ? 'small' : 'middle'}
                   />
                 )}
               </Space>
             </Col>
-            <Col xs={24} sm={24} md={8} lg={8} style={{ textAlign: 'right' }}>
+            <Col xs={24} sm={24} md={8} lg={8} style={{ textAlign: responsive.isMobile ? 'left' : 'right' }}>
               <Dropdown menu={{ items: exportMenuItems, onClick: handleExportMenuClick }}>
-                <Button icon={<DownloadOutlined />} size="large" block={false}>
+                <Button 
+                  icon={<DownloadOutlined />} 
+                  size={responsive.isMobile ? 'middle' : 'large'} 
+                  block={responsive.isMobile}
+                >
                   Download
                 </Button>
               </Dropdown>
@@ -1923,18 +1929,18 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         </Card>
 
         {/* Application Feature Summary */}
-        <Card style={{ marginBottom: '24px', background: 'linear-gradient(135deg, #E87103 0%, #FF8C00 100%)' }}>
-          <Title level={3} style={{ color: '#FFFFFF', marginBottom: '16px' }}>
+        <Card style={{ marginBottom: responsive.isMobile ? '16px' : '24px', background: 'linear-gradient(135deg, #E87103 0%, #FF8C00 100%)' }}>
+          <Title level={responsive.isMobile ? 4 : 3} style={{ color: '#FFFFFF', marginBottom: responsive.isMobile ? '12px' : '16px', fontSize: responsive.isMobile ? '18px' : '24px' }}>
             Soliflex Quarters Manager
           </Title>
-          <Space size="middle" wrap>
-            <Tag color="default" style={{ fontSize: '14px', padding: '4px 12px', background: 'rgba(255,255,255,0.2)', color: '#FFFFFF', border: 'none' }}>
+          <Space size={responsive.isMobile ? 'small' : 'middle'} wrap>
+            <Tag color="default" style={{ fontSize: responsive.isMobile ? '12px' : '14px', padding: responsive.isMobile ? '2px 8px' : '4px 12px', background: 'rgba(255,255,255,0.2)', color: '#FFFFFF', border: 'none' }}>
               Track Quarters Occupancy
             </Tag>
-            <Tag color="default" style={{ fontSize: '14px', padding: '4px 12px', background: 'rgba(255,255,255,0.2)', color: '#FFFFFF', border: 'none' }}>
+            <Tag color="default" style={{ fontSize: responsive.isMobile ? '12px' : '14px', padding: responsive.isMobile ? '2px 8px' : '4px 12px', background: 'rgba(255,255,255,0.2)', color: '#FFFFFF', border: 'none' }}>
               Monitor Agreement Renewals
             </Tag>
-            <Tag color="default" style={{ fontSize: '14px', padding: '4px 12px', background: 'rgba(255,255,255,0.2)', color: '#FFFFFF', border: 'none' }}>
+            <Tag color="default" style={{ fontSize: responsive.isMobile ? '12px' : '14px', padding: responsive.isMobile ? '2px 8px' : '4px 12px', background: 'rgba(255,255,255,0.2)', color: '#FFFFFF', border: 'none' }}>
               Manage Rental Expenses
             </Tag>
           </Space>
@@ -2054,7 +2060,7 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
             <Card 
               style={{ 
                 height: '100%',
-                minHeight: '140px',
+                minHeight: responsive.isMobile ? '120px' : '140px',
                 cursor: 'pointer',
                 border: agreementsNeedingReview > 0 ? '2px solid #ff4d4f' : '1px solid #d9d9d9',
                 background: agreementsNeedingReview > 0 
@@ -2080,16 +2086,16 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                 prefix={<AlertOutlined />}
                 valueStyle={{ 
                   color: agreementsNeedingReview > 0 ? '#ff4d4f' : '#262626', 
-                  fontSize: '28px', 
+                  fontSize: responsive.isMobile ? '22px' : '28px', 
                   fontWeight: 'bold' 
                 }}
               />
-              <Paragraph style={{ marginTop: '8px', marginBottom: 0, fontSize: '12px', color: '#595959' }}>
+              <Paragraph style={{ marginTop: '8px', marginBottom: 0, fontSize: responsive.isMobile ? '11px' : '12px', color: '#595959' }}>
                 {agreementsNeedingReview > 0 
                   ? 'Click to view details' 
                   : 'All agreements up to date'}
               </Paragraph>
-              <Paragraph style={{ marginTop: '4px', marginBottom: 0, fontSize: '10px', color: '#8c8c8c' }}>
+              <Paragraph style={{ marginTop: '4px', marginBottom: 0, fontSize: responsive.isMobile ? '9px' : '10px', color: '#8c8c8c' }}>
                 Today (IST): {dayjs.tz(dayjs(), 'Asia/Kolkata').format('DD-MM-YYYY')}
               </Paragraph>
             </Card>
@@ -2097,34 +2103,35 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         </Row>
 
         {/* Advance Return Metrics Cards */}
-          <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
+          <Row gutter={[responsive.isMobile ? 12 : 16, responsive.isMobile ? 12 : 16]} style={{ marginBottom: responsive.isMobile ? '16px' : '24px' }}>
             <Col xs={24} sm={12} md={8} lg={8}>
-              <Card>
+              <Card style={{ minHeight: responsive.isMobile ? '120px' : '140px' }}>
                 <Statistic
                 title="Total Advance Due Back"
                 value={advanceReturnMetrics.totalDueBack}
                 prefix={<WalletOutlined />}
                   precision={2}
                   formatter={(value) => `₹${value.toLocaleString()}`}
-                valueStyle={{ color: '#262626' }}
+                valueStyle={{ color: '#262626', fontSize: responsive.isMobile ? '20px' : '24px' }}
                 />
               </Card>
             </Col>
             <Col xs={24} sm={12} md={8} lg={8}>
-              <Card>
+              <Card style={{ minHeight: responsive.isMobile ? '120px' : '140px' }}>
                 <Statistic
                 title="Total Net Received"
                 value={advanceReturnMetrics.totalNetReceived}
                 prefix={<DollarOutlined />}
                   precision={2}
                   formatter={(value) => `₹${value.toLocaleString()}`}
-                valueStyle={{ color: '#52c41a' }}
+                valueStyle={{ color: '#52c41a', fontSize: responsive.isMobile ? '20px' : '24px' }}
                 />
               </Card>
             </Col>
             <Col xs={24} sm={12} md={8} lg={8}>
             <Card 
               style={{ 
+                minHeight: responsive.isMobile ? '120px' : '140px',
                 border: advanceReturnMetrics.pending > 0 ? '2px solid #ff4d4f' : '1px solid #d9d9d9',
                 background: advanceReturnMetrics.pending > 0 ? '#fff1f0' : '#FFFFFF',
               }}
@@ -2137,7 +2144,7 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                 formatter={(value) => `₹${value.toLocaleString()}`}
                 valueStyle={{ 
                   color: advanceReturnMetrics.pending > 0 ? '#ff4d4f' : '#262626',
-                  fontSize: '24px',
+                  fontSize: responsive.isMobile ? '20px' : '24px',
                   fontWeight: 'bold',
                 }}
                 />
@@ -2149,7 +2156,7 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         {recommendations.length > 0 && (
           <Card
             title="Cost Optimization Recommendations"
-            style={{ marginBottom: '24px' }}
+            style={{ marginBottom: responsive.isMobile ? '16px' : '24px' }}
           >
             {recommendations.map((rec, index) => (
               <Alert
@@ -2163,7 +2170,7 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                     : 'info'
                 }
                 showIcon
-                style={{ marginBottom: '12px' }}
+                style={{ marginBottom: responsive.isMobile ? '8px' : '12px' }}
               />
             ))}
           </Card>
@@ -2171,7 +2178,7 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
 
         {/* Charts Section - Full Width Stacked */}
         {/* Chart 1: Employee Breakdown by Department (Employee Count) */}
-        <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
+        <Row gutter={[responsive.isMobile ? 12 : 16, responsive.isMobile ? 12 : 16]} style={{ marginBottom: responsive.isMobile ? '16px' : '24px' }}>
           <Col xs={24} sm={24} md={24} lg={24} xl={24} xxl={24}>
             <Card title="Employee Breakdown by Department">
               {chartData.length > 0 ? (
@@ -2179,7 +2186,7 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                   ref={employeeChartRef} 
                   style={{ 
                     background: '#F0F2F5', 
-                    padding: '16px', 
+                    padding: responsive.isMobile ? '8px' : '16px', 
                     borderRadius: '8px',
                     width: '100%',
                     overflowX: 'auto',
@@ -2187,11 +2194,11 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                   }}
                 >
                   <div style={{ minWidth: '100%', width: 'max-content' }}>
-                    <Column {...employeeChartConfig} height={400} autoFit />
+                    <Column {...employeeChartConfig} height={responsive.isMobile ? 300 : 400} autoFit />
                   </div>
                 </div>
               ) : (
-                <div style={{ padding: '40px', textAlign: 'center', color: '#8c8c8c', fontSize: '14px' }}>
+                <div style={{ padding: responsive.isMobile ? '20px' : '40px', textAlign: 'center', color: '#8c8c8c', fontSize: responsive.isMobile ? '12px' : '14px' }}>
                   No Employee Department data available for analysis.
                 </div>
               )}
@@ -2200,7 +2207,7 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         </Row>
 
         {/* Chart 3: Monthly Rent Cost by Department */}
-        <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
+        <Row gutter={[responsive.isMobile ? 12 : 16, responsive.isMobile ? 12 : 16]} style={{ marginBottom: responsive.isMobile ? '16px' : '24px' }}>
           <Col xs={24} sm={24} md={24} lg={24} xl={24} xxl={24}>
             <Card title="Monthly Rent Cost by Department">
               {processedCosts.rentByDepartment.length > 0 ? (
@@ -2208,7 +2215,7 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                   ref={deptRentChartRef} 
                   style={{ 
                     background: '#F0F2F5', 
-                    padding: '16px', 
+                    padding: responsive.isMobile ? '8px' : '16px', 
                     borderRadius: '8px',
                     width: '100%',
                     overflowX: 'auto',
@@ -2216,11 +2223,11 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                   }}
                 >
                   <div style={{ minWidth: '100%', width: 'max-content' }}>
-                    <Column {...departmentRentAggregatedConfig} height={400} autoFit />
+                    <Column {...departmentRentAggregatedConfig} height={responsive.isMobile ? 300 : 400} autoFit />
                   </div>
                 </div>
               ) : (
-                <div style={{ padding: '40px', textAlign: 'center', color: '#8c8c8c' }}>
+                <div style={{ padding: responsive.isMobile ? '20px' : '40px', textAlign: 'center', color: '#8c8c8c', fontSize: responsive.isMobile ? '12px' : '14px' }}>
                   No department rent cost data available
                 </div>
               )}
@@ -2229,7 +2236,7 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         </Row>
 
         {/* Chart 4: Monthly Rent Cost by Employee Designation */}
-        <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
+        <Row gutter={[responsive.isMobile ? 12 : 16, responsive.isMobile ? 12 : 16]} style={{ marginBottom: responsive.isMobile ? '16px' : '24px' }}>
           <Col xs={24} sm={24} md={24} lg={24} xl={24} xxl={24}>
             <Card title="Monthly Rent Cost by Employee Designation">
               {processedCosts.rentByDesignation.length > 0 ? (
@@ -2237,7 +2244,7 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                   ref={designationRentChartRef} 
                   style={{ 
                     background: '#F0F2F5', 
-                    padding: '16px', 
+                    padding: responsive.isMobile ? '8px' : '16px', 
                     borderRadius: '8px',
                     width: '100%',
                     overflowX: 'auto',
@@ -2245,11 +2252,11 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                   }}
                 >
                   <div style={{ minWidth: '100%', width: 'max-content' }}>
-                    <Column {...designationRentAggregatedConfig} height={400} autoFit />
+                    <Column {...designationRentAggregatedConfig} height={responsive.isMobile ? 300 : 400} autoFit />
                   </div>
                 </div>
               ) : (
-                <div style={{ padding: '40px', textAlign: 'center', color: '#8c8c8c' }}>
+                <div style={{ padding: responsive.isMobile ? '20px' : '40px', textAlign: 'center', color: '#8c8c8c', fontSize: responsive.isMobile ? '12px' : '14px' }}>
                   No designation rent cost data available
                 </div>
               )}

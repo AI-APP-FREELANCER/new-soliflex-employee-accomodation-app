@@ -15,33 +15,26 @@ import Residences from './Residences';
 import Agreements from './Agreements';
 import Employees from './Employees';
 import DashboardHome from './DashboardHome';
+import { useResponsive } from '../utils/useResponsive';
 import '../App.css';
 
 const { Header, Sider, Content } = Layout;
 
 const Dashboard = () => {
+  const responsive = useResponsive();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMenuVisible, setMobileMenuVisible] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
   const [selectedKey, setSelectedKey] = useState('dashboard');
   const [agreementsFilter, setAgreementsFilter] = useState(null);
   const { logout, user } = useAuth();
   const navigate = useNavigate();
 
-  // Responsive detection
+  // Auto-collapse sidebar on mobile
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-      // Auto-collapse sidebar on mobile
-      if (window.innerWidth < 768) {
-        setCollapsed(true);
-      }
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+    if (responsive.isMobileOrTablet) {
+      setCollapsed(true);
+    }
+  }, [responsive.isMobileOrTablet]);
 
   const handleLogout = () => {
     logout();
@@ -74,14 +67,14 @@ const Dashboard = () => {
   const handleNavigateToAgreements = (filter) => {
     setAgreementsFilter(filter);
     setSelectedKey('agreements');
-    if (isMobile) {
+    if (responsive.isMobileOrTablet) {
       setMobileMenuVisible(false);
     }
   };
 
   const handleMenuClick = ({ key }) => {
     setSelectedKey(key);
-    if (isMobile) {
+    if (responsive.isMobileOrTablet) {
       setMobileMenuVisible(false);
     }
   };
@@ -113,10 +106,10 @@ const Dashboard = () => {
           justifyContent: 'center',
           color: '#FFFFFF',
           fontWeight: 'bold',
-          fontSize: collapsed && !isMobile ? '14px' : '16px',
+          fontSize: collapsed && !responsive.isMobileOrTablet ? '14px' : '16px',
         }}
       >
-        {collapsed && !isMobile ? 'SQM' : 'Soliflex Quarters'}
+        {collapsed && !responsive.isMobileOrTablet ? 'SQM' : 'Soliflex Quarters'}
       </div>
       <Menu
         theme="light"
@@ -131,7 +124,7 @@ const Dashboard = () => {
   return (
     <Layout className="dashboard-layout" style={{ minHeight: '100vh' }}>
       {/* Desktop Sidebar */}
-      {!isMobile && (
+      {!responsive.isMobileOrTablet && (
         <Sider
           trigger={null}
           collapsible
@@ -155,14 +148,14 @@ const Dashboard = () => {
       )}
 
       {/* Mobile Drawer */}
-      {isMobile && (
+      {responsive.isMobileOrTablet && (
         <Drawer
           title="Soliflex Quarters"
           placement="left"
           onClose={() => setMobileMenuVisible(false)}
           open={mobileMenuVisible}
           bodyStyle={{ padding: 0 }}
-          width={250}
+          width={responsive.isMobile ? 280 : 300}
         >
           {sidebarMenu}
         </Drawer>
@@ -170,7 +163,7 @@ const Dashboard = () => {
 
       <Layout 
         style={{ 
-          marginLeft: isMobile ? 0 : (collapsed ? 80 : 250), 
+          marginLeft: responsive.isMobileOrTablet ? 0 : (collapsed ? 80 : 250), 
           transition: 'margin-left 0.2s',
           background: '#F0F2F5',
           minHeight: '100vh',
@@ -178,7 +171,7 @@ const Dashboard = () => {
       >
         <Header
           style={{
-            padding: isMobile ? '0 16px' : '0 24px',
+            padding: responsive.isMobile ? '0 12px' : responsive.isTablet ? '0 16px' : '0 24px',
             background: '#FFFFFF',
             borderBottom: '1px solid #E0E0E0',
             display: 'flex',
@@ -188,13 +181,14 @@ const Dashboard = () => {
             position: 'sticky',
             top: 0,
             zIndex: 99,
+            height: responsive.isMobile ? 56 : 64,
           }}
         >
           <Button
             type="text"
-            icon={isMobile ? <MenuUnfoldOutlined /> : (collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />)}
+            icon={responsive.isMobileOrTablet ? <MenuUnfoldOutlined /> : (collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />)}
             onClick={() => {
-              if (isMobile) {
+              if (responsive.isMobileOrTablet) {
                 setMobileMenuVisible(true);
               } else {
                 setCollapsed(!collapsed);
@@ -202,19 +196,19 @@ const Dashboard = () => {
             }}
             style={{
               fontSize: '16px',
-              width: isMobile ? 48 : 64,
-              height: isMobile ? 48 : 64,
+              width: responsive.isMobile ? 40 : responsive.isTablet ? 48 : 64,
+              height: responsive.isMobile ? 40 : responsive.isTablet ? 48 : 64,
               color: '#262626',
             }}
           />
           <div style={{ 
             display: 'flex', 
             alignItems: 'center', 
-            gap: isMobile ? '8px' : '16px',
+            gap: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
             flexWrap: 'wrap',
           }}>
-            {!isMobile && (
-              <span style={{ color: '#262626', fontWeight: 500 }}>
+            {!responsive.isMobile && (
+              <span style={{ color: '#262626', fontWeight: 500, fontSize: responsive.isTablet ? '13px' : '14px' }}>
                 Welcome, {user?.username || 'Admin'}
               </span>
             )}
@@ -223,16 +217,16 @@ const Dashboard = () => {
               danger
               icon={<LogoutOutlined />}
               onClick={handleLogout}
-              size={isMobile ? 'small' : 'middle'}
+              size={responsive.isMobile ? 'small' : 'middle'}
             >
-              {isMobile ? '' : 'Logout'}
+              {responsive.isMobile ? '' : 'Logout'}
             </Button>
           </div>
         </Header>
         <Content 
           className="dashboard-content"
           style={{
-            padding: isMobile ? '16px' : '24px',
+            padding: responsive.isMobile ? '12px' : responsive.isTablet ? '16px' : '24px',
             minHeight: 'calc(100vh - 64px)',
             width: '100%',
             maxWidth: '100%',

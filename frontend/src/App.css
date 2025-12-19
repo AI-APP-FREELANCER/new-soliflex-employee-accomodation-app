@@ -9,6 +9,7 @@
   align-items: center;
   min-height: 100vh;
   background: linear-gradient(135deg, #FFFFFF 0%, #F0F2F5 100%);
+  padding: 16px;
 }
 
 .login-card {
@@ -39,17 +40,71 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
-/* Responsive Styles */
-@media (max-width: 768px) {
+/* Responsive Styles - Mobile First Approach */
+/* Extra Small devices (phones, < 576px) */
+@media (max-width: 575.98px) {
   .dashboard-content {
-    margin: 16px;
+    margin: 8px;
+    padding: 12px;
+    min-height: calc(100vh - 64px);
+  }
+
+  .login-card {
+    padding: 16px;
+  }
+
+  .ant-card-body {
+    padding: 12px;
+  }
+
+  .ant-statistic-title {
+    font-size: 12px !important;
+  }
+
+  .ant-statistic-content {
+    font-size: 20px !important;
+  }
+}
+
+/* Small devices (landscape phones, >= 576px) */
+@media (min-width: 576px) and (max-width: 767.98px) {
+  .dashboard-content {
+    margin: 12px;
     padding: 16px;
     min-height: calc(100vh - 80px);
+  }
+
+  .ant-card-body {
+    padding: 16px;
+  }
+}
+
+/* Medium devices (tablets, >= 768px) */
+@media (min-width: 768px) and (max-width: 991.98px) {
+  .dashboard-content {
+    margin: 16px;
+    padding: 20px;
+  }
+}
+
+/* Large devices (desktops, >= 992px) */
+@media (min-width: 992px) and (max-width: 1199.98px) {
+  .dashboard-content {
+    margin: 20px;
+    padding: 24px;
+  }
+}
+
+/* Extra large devices (large desktops, >= 1200px) */
+@media (min-width: 1200px) {
+  .dashboard-content {
+    margin: 24px;
+    padding: 24px;
   }
 }
 
 /* Prevent horizontal scroll on mobile */
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   body {
     overflow-x: hidden;
   }
@@ -57,12 +112,35 @@
   .ant-layout-content {
     overflow-x: hidden;
   }
+
+  /* Make tables scrollable horizontally on mobile */
+  .ant-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ant-table {
+    min-width: 800px;
+  }
 }
 
 /* Chart container responsive */
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .ant-card-body {
     padding: 12px;
+  }
+
+  /* Make charts responsive */
+  .g2-chart {
+    width: 100% !important;
+    height: auto !important;
+  }
+}
+
+/* Tablet optimizations */
+@media (min-width: 768px) and (max-width: 991.98px) {
+  .ant-card-body {
+    padding: 16px;
   }
 }
 
@@ -71,6 +149,108 @@
   .dashboard-content {
     max-width: 1800px;
     margin: 24px auto;
+  }
+}
+
+/* Form responsive improvements */
+@media (max-width: 767.98px) {
+  .ant-form-item {
+    margin-bottom: 16px;
+  }
+
+  .ant-form-item-label {
+    padding-bottom: 4px;
+  }
+
+  .ant-input,
+  .ant-select-selector,
+  .ant-picker {
+    font-size: 16px !important; /* Prevents zoom on iOS */
+  }
+}
+
+/* Button responsive improvements */
+@media (max-width: 575.98px) {
+  .ant-btn {
+    font-size: 14px;
+    height: 36px;
+    padding: 4px 12px;
+  }
+
+  .ant-btn-lg {
+    height: 40px;
+    font-size: 16px;
+  }
+}
+
+/* Typography responsive */
+@media (max-width: 575.98px) {
+  .ant-typography h1 {
+    font-size: 24px;
+  }
+
+  .ant-typography h2 {
+    font-size: 20px;
+  }
+
+  .ant-typography h3 {
+    font-size: 18px;
+  }
+
+  .ant-typography h4 {
+    font-size: 16px;
+  }
+
+  .ant-typography h5 {
+    font-size: 14px;
+  }
+}
+
+/* Table responsive improvements */
+@media (max-width: 767.98px) {
+  .ant-table-thead > tr > th {
+    padding: 8px 4px;
+    font-size: 12px;
+  }
+
+  .ant-table-tbody > tr > td {
+    padding: 8px 4px;
+    font-size: 12px;
+  }
+}
+
+/* Card spacing responsive */
+@media (max-width: 575.98px) {
+  .ant-card {
+    margin-bottom: 12px;
+  }
+}
+
+/* Space component responsive */
+@media (max-width: 575.98px) {
+  .ant-space {
+    gap: 8px !important;
+  }
+}
+
+/* Drawer responsive */
+@media (max-width: 575.98px) {
+  .ant-drawer-content-wrapper {
+    width: 100% !important;
+  }
+}
+
+/* Modal responsive */
+@media (max-width: 575.98px) {
+  .ant-modal {
+    margin: 0;
+    max-width: 100%;
+    top: 0;
+    padding-bottom: 0;
+  }
+
+  .ant-modal-content {
+    border-radius: 0;
   }
 }
 
