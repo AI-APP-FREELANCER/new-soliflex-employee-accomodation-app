@@ -53,15 +53,31 @@ class ExcelReader {
         // Only convert if it's in the expected range
         if (year >= 2023 && year <= 2100) {
           return jsDate.toISOString().split('T')[0]; // Return YYYY-MM-DD
-        } else {
-          console.warn('Excel date conversion resulted in out-of-range year:', year, 'from serial:', dateValue);
         }
       }
     }
     
     // If conversion failed or date is out of range, return null
-    console.warn('Invalid or out-of-range date detected:', dateValue, 'Type:', typeof dateValue);
     return null;
+  }
+
+  /**
+   * Calculate renewal due date: possession date + 11 months (default contract length).
+   * Returns YYYY-MM-DD or null if possession date is invalid/missing.
+   */
+  calculateRenewalDueDate(possessionDate, durationMonths = 11) {
+    if (!possessionDate) return null;
+    const start = new Date(possessionDate);
+    if (isNaN(start.getTime())) return null;
+
+    // Calculate end date by adding duration months
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + durationMonths);
+
+    // Normalize time to avoid timezone shifts when converting to ISO
+    end.setHours(12, 0, 0, 0);
+
+    return end.toISOString().split('T')[0];
   }
 
   loadData() {
@@ -72,7 +88,6 @@ class ExcelReader {
         cellNF: false
       });
       
-      // Read each worksheet
       const sheets = ['residence_master', 'agreement_master', 'employee_master'];
       
       sheets.forEach(sheetName => {
@@ -91,6 +106,12 @@ class ExcelReader {
             if (sheetName === 'agreement_master') {
               processedRow.agreement_possesion_date = this.convertExcelDate(processedRow.agreement_possesion_date);
               processedRow.agreement_renewal_due_date = this.convertExcelDate(processedRow.agreement_renewal_due_date);
+
+              // Always align renewal due date to possession date (11 months - 90 days)
+              const calculatedRenewal = this.calculateRenewalDueDate(processedRow.agreement_possesion_date);
+              if (calculatedRenewal) {
+                processedRow.agreement_renewal_due_date = calculatedRenewal;
+              }
             } else if (sheetName === 'employee_master') {
               processedRow.employee_date_of_joining = this.convertExcelDate(processedRow.employee_date_of_joining);
             }
@@ -100,12 +121,11 @@ class ExcelReader {
           
           this.data[sheetName] = processedData;
         } else {
-          console.warn(`Sheet ${sheetName} not found in Excel file`);
+          // If sheet missing, skip silently to avoid noisy logs in production
         }
       });
       
       this.loaded = true;
-      console.log('Excel data loaded successfully');
       return this.data;
     } catch (error) {
       console.error('Error loading Excel data:', error.message);
@@ -148,15 +168,30 @@ class ExcelReader {
   updateAgreement(agreementId, updates) {
     const index = this.data.agreement_master.findIndex(a => a.agreement_id === agreementId);
     if (index !== -1) {
-      this.data.agreement_master[index] = { ...this.data.agreement_master[index], ...updates };
-      return this.data.agreement_master[index];
+      const merged = { ...this.data.agreement_master[index], ...updates };
+
+      // Recalculate renewal due date whenever possession date changes or when missing
+      const possessionForCalc = merged.agreement_possesion_date;
+      const recalculatedDue = this.calculateRenewalDueDate(possessionForCalc);
+      if (recalculatedDue) {
+        merged.agreement_renewal_due_date = recalculatedDue;
+      }
+
+      this.data.agreement_master[index] = merged;
+      return merged;
     }
     return null;
   }
 
   addAgreement(agreement) {
-    this.data.agreement_master.push(agreement);
-    return agreement;
+    const agreementWithDue = { ...agreement };
+    const calculatedDue = this.calculateRenewalDueDate(agreementWithDue.agreement_possesion_date);
+    if (calculatedDue) {
+      agreementWithDue.agreement_renewal_due_date = calculatedDue;
+    }
+
+    this.data.agreement_master.push(agreementWithDue);
+    return agreementWithDue;
   }
 
   updateEmployee(employeeId, updates) {

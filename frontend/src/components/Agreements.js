@@ -21,6 +21,12 @@ import { agreementAPI, residenceAPI } from '../services/api';
 import { exportToPDF, exportTableToExcel } from '../utils/exportUtils';
 import { formatDateForAPI, formatDateForDisplay, parseDateFromAPI, getMinDate, getMaxDate } from '../utils/dateUtils';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+dayjs.extend(utc);
+dayjs.extend(timezone);
+// Set default timezone to IST (Asia/Kolkata)
+dayjs.tz.setDefault('Asia/Kolkata');
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -37,7 +43,7 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
   const [isRenewal, setIsRenewal] = useState(false);
   const [pageSize, setPageSize] = useState(10);
   const [searchText, setSearchText] = useState('');
-  const [showReviewFilter, setShowReviewFilter] = useState(false);
+  const [reviewFilter, setReviewFilter] = useState(null); // null | 'review' | 'due90' | 'pastDue'
   const [isMobile, setIsMobile] = useState(false);
   const [form] = Form.useForm();
   const [refundForm] = Form.useForm();
@@ -62,8 +68,8 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
 
   // Handle initial filter from navigation
   useEffect(() => {
-    if (initialFilter === 'review') {
-      setShowReviewFilter(true);
+    if (['review', 'due90', 'pastDue'].includes(initialFilter)) {
+      setReviewFilter(initialFilter);
     }
   }, [initialFilter]);
 
@@ -146,13 +152,12 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
     }
   };
 
-  // Calculate renewal due date (90 days before end date)
+  // Calculate renewal due date based on possession date + duration (default 11 months)
   const calculateRenewalDueDate = (possessionDate, durationMonths = 11) => {
     if (!possessionDate) return null;
     const startDate = dayjs(possessionDate);
     const endDate = startDate.add(durationMonths, 'month');
-    const renewalDueDate = endDate.subtract(90, 'day');
-    return renewalDueDate.format('YYYY-MM-DD');
+    return endDate.format('YYYY-MM-DD');
   };
 
   // Calculate end date from possession date
@@ -208,9 +213,9 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
 
   const handleRenewSubmit = async (values) => {
     try {
-      // Calculate renewal due date (90 days before end date)
+      // Calculate renewal due date (possession + 11 months)
       const endDate = values.new_end_date;
-      const renewalDueDate = endDate ? formatDateForAPI(endDate.subtract(90, 'day')) : null;
+      const renewalDueDate = endDate ? formatDateForAPI(endDate) : null;
 
       // Create new agreement
       const newAgreementData = {
@@ -228,6 +233,7 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
       // Mark old agreement as Renewed
       await agreementAPI.update(selectedAgreement.agreement_id, {
         agreement_status: 'Renewed',
+        agreement_renewal_due_date: null, // Clear obsolete due date on the old agreement
       });
 
       // Update employee allocations to new agreement_id (if needed)
@@ -410,15 +416,41 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
     }
   }, [renewalStartDate, renewalModalVisible, renewalForm]);
 
+  const renewalCounts = useMemo(() => {
+    const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
+    const ninetyDaysFromNow = today.add(90, 'day');
+    
+    // DEBUG: Log current date being used (only once per render)
+    console.log('📅 Agreements Component - Current Date (IST):', today.format('DD-MM-YYYY'));
+    
+    let pastDue = 0;
+    let due90 = 0;
+
+    agreements.forEach(agreement => {
+      const renewalDueDate = agreement.agreement_renewal_due_date;
+      if (!renewalDueDate && renewalDueDate !== 0) return;
+      const dueDate = parseDateFromAPI(renewalDueDate);
+      if (!dueDate || !dueDate.isValid()) return;
+
+      if (dueDate.isBefore(today, 'day')) {
+        pastDue += 1;
+      } else if ((dueDate.isSame(today, 'day') || dueDate.isAfter(today, 'day')) &&
+        dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day')) {
+        due90 += 1;
+      }
+    });
+
+    return { pastDue, due90 };
+  }, [agreements]);
+
   // Filter agreements based on search text and review filter
   const filteredAgreements = useMemo(() => {
     let result = agreements;
 
-    // Apply review filter (Past Due or Nearing Due within 30 days)
-    // Use robust date parser to handle Excel serial dates and various formats
-    if (showReviewFilter) {
-      const today = dayjs();
-      const thirtyDaysFromNow = today.add(30, 'day');
+    // Apply review filter (IST-based comparisons)
+    if (reviewFilter) {
+      const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
+      const ninetyDaysFromNow = today.add(90, 'day');
       
       result = result.filter(agreement => {
         const renewalDueDate = agreement.agreement_renewal_due_date;
@@ -432,10 +464,17 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
         
         // Past Due: renewal due date has passed (before today)
         const isPastDue = dueDate.isBefore(today, 'day');
-        // Nearing Due: within next 30 days (today or later, but within 30 days)
+        // Nearing Due: within next 90 days (today or later, but within 90 days)
         const isNearingDue = (dueDate.isSame(today, 'day') || dueDate.isAfter(today, 'day')) 
-          && dueDate.isBefore(thirtyDaysFromNow.add(1, 'day'), 'day');
+          && dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day');
         
+        if (reviewFilter === 'pastDue') {
+          return isPastDue;
+        }
+        if (reviewFilter === 'due90') {
+          return isNearingDue && !isPastDue;
+        }
+        // 'review' combines both
         return isPastDue || isNearingDue;
       });
     }
@@ -460,7 +499,7 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
     }
 
     return result;
-  }, [searchText, agreements, showReviewFilter]);
+  }, [searchText, agreements, reviewFilter]);
 
   // Export handlers
   const handleExportPDF = async () => {
@@ -559,16 +598,16 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
         const status = (record.agreement_status || '').toString().trim();
         const isActive = status.toLowerCase() === 'active';
         
-        // Check if renewal is due (within 30 days or past due)
+        // Check if renewal is due (within 90 days or past due) - using IST
         const renewalDueDate = record.agreement_renewal_due_date;
         let isRenewalDue = false;
         if (renewalDueDate) {
           const dueDate = parseDateFromAPI(renewalDueDate);
           if (dueDate && dueDate.isValid()) {
-            const today = dayjs();
-            const thirtyDaysFromNow = today.add(30, 'day');
-            // Past due or within 30 days
-            isRenewalDue = dueDate.isBefore(thirtyDaysFromNow.add(1, 'day'), 'day');
+            const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
+            const ninetyDaysFromNow = today.add(90, 'day');
+            // Past due or within 90 days
+            isRenewalDue = dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day');
           }
         }
         
@@ -669,21 +708,31 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
           allowClear
           style={{ width: isMobile ? '100%' : '400px' }}
         />
-        {showReviewFilter && (
-          <Tag 
-            color="red" 
-            closable 
-            onClose={() => {
-              setShowReviewFilter(false);
-              if (onFilterClear) {
-                onFilterClear();
-              }
-            }}
-            style={{ fontSize: '14px', padding: '4px 12px' }}
-          >
-            Review Required Filter Active ({filteredAgreements.length} agreements)
+        <Space wrap>
+          <Tag color={reviewFilter ? 'blue' : 'default'} style={{ padding: '4px 8px' }}>
+            Renewal Filters
           </Tag>
-        )}
+          <Button size="small" type={reviewFilter === 'due90' ? 'primary' : 'default'} onClick={() => setReviewFilter('due90')}>
+            Due ≤ 90 days ({renewalCounts.due90})
+          </Button>
+          <Button size="small" type={reviewFilter === 'pastDue' ? 'primary' : 'default'} danger={reviewFilter === 'pastDue'} onClick={() => setReviewFilter('pastDue')}>
+            Past due ({renewalCounts.pastDue})
+          </Button>
+          <Button size="small" type={reviewFilter === 'review' ? 'primary' : 'default'} onClick={() => setReviewFilter('review')}>
+            All due/past ({renewalCounts.due90 + renewalCounts.pastDue})
+          </Button>
+          {reviewFilter && (
+            <Button
+              size="small"
+              onClick={() => {
+                setReviewFilter(null);
+                if (onFilterClear) onFilterClear();
+              }}
+            >
+              Clear
+            </Button>
+          )}
+        </Space>
       </div>
 
       <div ref={tableRef}>

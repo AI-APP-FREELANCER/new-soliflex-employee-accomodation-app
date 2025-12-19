@@ -93,24 +93,6 @@ router.get('/occupancy-rate', (req, res) => {
       ? ((activeEmployeesWithAgreement / totalAvailableHouses) * 100)
       : null; // Return null if denominator is zero
 
-    // Diagnostic output
-    console.log('=== Occupancy Rate Calculation ===');
-    console.log(`Total Employees: ${employees.length}`);
-    console.log(`Active Employees with Agreement: ${activeEmployeesWithAgreement}`);
-    console.log(`Total Active Residences: ${activeResidences.length}`);
-    console.log(`Total Available Houses Count: ${totalAvailableHouses}`);
-    console.log(`Calculation: (${activeEmployeesWithAgreement} / ${totalAvailableHouses}) * 100`);
-    console.log(`Occupancy Rate: ${occupancyRate !== null ? occupancyRate.toFixed(2) : 'N/A'}%`);
-    
-    // Additional debug: Show sample residence house counts
-    if (activeResidences.length > 0) {
-      console.log('Sample Active Residences (first 5):');
-      activeResidences.slice(0, 5).forEach(r => {
-        console.log(`  - ${r.residence_id}: house_count = ${r.residence_house_count} (parsed: ${parseInt(r.residence_house_count) || 0})`);
-      });
-    }
-    console.log('==================================');
-
     res.json({
       occupancyRate: occupancyRate !== null && !isNaN(occupancyRate) ? parseFloat(occupancyRate.toFixed(2)) : null,
       activeEmployeesWithAgreement,
@@ -127,16 +109,6 @@ router.get('/employee-status', (req, res) => {
   try {
     const employees = excelReader.getEmployees();
     
-    // DEBUG: Log sample employee statuses to see actual values
-    console.log('=== Employee Status Calculation ===');
-    console.log(`Total Employees Loaded: ${employees.length}`);
-    if (employees.length > 0) {
-      console.log('Sample Employee Statuses (first 10):');
-      employees.slice(0, 10).forEach((emp, idx) => {
-        console.log(`  ${idx + 1}. employee_id: ${emp.employee_id}, employee_status: "${emp.employee_status}" (type: ${typeof emp.employee_status})`);
-      });
-    }
-    
     // Case-sensitive filter: Count where employee_status equals 'Active' or 'Inactive' exactly
     // Also handle common variations
     let activeCount = 0;
@@ -146,7 +118,6 @@ router.get('/employee-status', (req, res) => {
     employees.forEach(employee => {
       const status = employee.employee_status;
       
-      // Track all unique status values for debugging
       if (status) {
         statusMap[status] = (statusMap[status] || 0) + 1;
       }
@@ -163,21 +134,12 @@ router.get('/employee-status', (req, res) => {
       else if (status && typeof status === 'string') {
         const statusLower = status.trim().toLowerCase();
         if (statusLower === 'active') {
-          console.warn(`Found lowercase 'active' status for employee ${employee.employee_id}, converting to Active`);
           activeCount++;
         } else if (statusLower === 'inactive') {
-          console.warn(`Found lowercase 'inactive' status for employee ${employee.employee_id}, converting to Inactive`);
           inactiveCount++;
         }
       }
     });
-
-    // Diagnostic output
-    console.log('Status Value Distribution:', JSON.stringify(statusMap, null, 2));
-    console.log(`Active Count (status = 'Active'): ${activeCount}`);
-    console.log(`Inactive Count (status = 'Inactive'): ${inactiveCount}`);
-    console.log(`Total Employees: ${employees.length}`);
-    console.log('====================================');
 
     res.json({
       activeCount,
@@ -193,11 +155,16 @@ router.get('/employee-status', (req, res) => {
 // GET renewal alerts (agreements expiring within specified days)
 router.get('/renewal-alerts', (req, res) => {
   try {
-    const days = parseInt(req.query.days) || 60;
+    const days = parseInt(req.query.days) || 90;
     const agreements = excelReader.getAgreements();
     const residences = excelReader.getResidences();
 
-    const today = new Date();
+    // Use IST timezone (UTC+5:30) for date calculations
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+    const istNow = new Date(now.getTime() + istOffset);
+    const today = new Date(istNow.getFullYear(), istNow.getMonth(), istNow.getDate());
+    
     const alertDate = new Date(today);
     alertDate.setDate(today.getDate() + days);
 
@@ -208,13 +175,14 @@ router.get('/renewal-alerts', (req, res) => {
           return false;
         }
 
-        // Check if renewal due date is within the alert period
+        // Check if renewal due date is within the alert period (including past due)
         if (!agreement.agreement_renewal_due_date) {
           return false;
         }
 
         const renewalDate = new Date(agreement.agreement_renewal_due_date);
-        return renewalDate <= alertDate && renewalDate >= today;
+        // Include past due agreements (before today) and upcoming (within alert period)
+        return renewalDate <= alertDate;
       })
       .map(agreement => {
         const residence = residences.find(r => 
@@ -480,17 +448,12 @@ router.get('/employee-breakdown', (req, res) => {
   try {
     const employees = excelReader.getEmployees();
     
-    console.log('=== Employee Department Breakdown ===');
-    console.log(`Total Employees Loaded: ${employees.length}`);
-    
     // Filter to only include active employees for department breakdown
     // Case-sensitive: status must equal 'Active' exactly
     const activeEmployees = employees.filter(e => {
       const status = e.employee_status;
       return status === 'Active' || (status && typeof status === 'string' && status.trim().toLowerCase() === 'active');
     });
-    
-    console.log(`Active Employees Found: ${activeEmployees.length}`);
     
     // Use reduce() to group by employee_department and count employee_id occurrences
     const departmentBreakdown = employees.reduce((acc, employee) => {
@@ -536,22 +499,14 @@ router.get('/employee-breakdown', (req, res) => {
     const statusData = Object.entries(statusBreakdown)
       .map(([status, count]) => ({ status, count }));
 
-    // Diagnostic output
-    console.log('Department Breakdown Object:', JSON.stringify(departmentBreakdown, null, 2));
-    console.log('Department Data Array:', JSON.stringify(departmentData, null, 2));
-    console.log(`Total Active Employees: ${activeEmployees.length}`);
-    console.log(`Total Departments Found: ${departmentData.length}`);
-    
-    if (departmentData.length === 0) {
-      console.warn('WARNING: No department data found! Check if employees have employee_department values.');
-      if (activeEmployees.length > 0) {
-        console.log('Sample Active Employees (first 5):');
-        activeEmployees.slice(0, 5).forEach(emp => {
-          console.log(`  - ${emp.employee_id}: department = "${emp.employee_department}"`);
-        });
-      }
+    if (departmentData.length === 0 && activeEmployees.length === 0) {
+      res.json({
+        byDepartment: [],
+        byStatus: statusData,
+        total: employees.length,
+      });
+      return;
     }
-    console.log('=====================================');
 
     res.json({
       byDepartment: departmentData, // Always return array (empty if no data)
@@ -570,10 +525,6 @@ router.get('/department-rent-cost', (req, res) => {
     const employees = excelReader.getEmployees();
     const agreements = excelReader.getAgreements();
     
-    console.log('=== Department Rent Cost Calculation ===');
-    console.log(`Total Employees: ${employees.length}`);
-    console.log(`Total Agreements: ${agreements.length}`);
-    
     // Filter active agreements
     const activeAgreements = agreements.filter(a => 
       a.agreement_status === 'Active' || a.agreement_status === 'active'
@@ -587,9 +538,6 @@ router.get('/department-rent-cost', (req, res) => {
         agreementRentMap[agreement.agreement_id] = rent;
       }
     });
-    
-    console.log(`Active Agreements: ${activeAgreements.length}`);
-    console.log(`Agreements with Rent > 0: ${Object.keys(agreementRentMap).length}`);
     
     // Group employees by department and sum their allocated agreement rents
     const departmentRentMap = {};
@@ -620,10 +568,6 @@ router.get('/department-rent-cost', (req, res) => {
       }))
       .filter(item => item.totalRent > 0)
       .sort((a, b) => b.totalRent - a.totalRent); // Sort descending
-    
-    console.log('Department Rent Cost Data:', JSON.stringify(departmentRentData, null, 2));
-    console.log(`Total Departments with Rent: ${departmentRentData.length}`);
-    console.log('========================================');
     
     res.json(departmentRentData);
   } catch (error) {

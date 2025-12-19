@@ -149,3 +149,28 @@ Export PDF: Allow downloading the entire Analytics Dashboard (charts and key sum
 Export Excel: Allow downloading the raw data that feeds the main Residences table and the Agreements table into a formatted Excel sheet.
 
 Cost Optimization Recommendations: Implement an AntD Alert or Card that shows text-based Recommendations for Optimizing Cost (e.g., "Review properties with lowest house count for potential consolidation," "Upcoming high-value renewals"). The logic for these recommendations should be simple, rule-based checks on the backend data.
+
+
+
+
+ageement_master work sheet has (agreement_id, agreement_residence_id, agreement_possesion_date, agreement_renewal_due_date, agreement_employee_unit, agreement_advance_amount, agreement_monthly_rent_amount, agreement_status) 
+
+and 
+
+employee_master work sheet has (employee_id, emplyee_allocated_agreement_id, employee_first_name, employee_last_name, employee_sir_name, employee_department, employee_designation, employee_date_of_joining, employee_status)
+
+and
+
+residence_master work sheet has (residence_id,
+residence_owner_id,
+residence_owner_name,
+residence_door_number,
+residence_address_line_1,
+residence_address_line_2,
+residence_address_line_3,
+residence_state,
+residence_pin_code,
+residence_country,
+residence_house_count,
+residence_status
+)

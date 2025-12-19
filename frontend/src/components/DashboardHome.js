@@ -28,6 +28,12 @@ import {
 } from '@ant-design/icons';
 import { Column } from '@ant-design/charts';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+dayjs.extend(utc);
+dayjs.extend(timezone);
+// Set default timezone to IST (Asia/Kolkata)
+dayjs.tz.setDefault('Asia/Kolkata');
 import { analyticsAPI, residenceAPI, agreementAPI, employeeAPI } from '../services/api';
 import { exportChartsToPDF, exportMultipleSheetsToExcel } from '../utils/exportUtils';
 import { formatDateForDisplay, parseDateFromAPI } from '../utils/dateUtils';
@@ -42,6 +48,10 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
     upcomingRenewals: 0,
     totalMonthlyRent: 0,
     totalAdvanceLocked: 0,
+  });
+  const [renewalBuckets, setRenewalBuckets] = useState({
+    dueIn90: 0,
+    pastDue: 0,
   });
   const [employeeByDept, setEmployeeByDept] = useState([]);
   const [employeeStatus, setEmployeeStatus] = useState({ active: 0, inactive: 0 });
@@ -190,9 +200,19 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         analyticsAPI.getCostOptimizationRecommendations(),
       ]);
 
-      const residences = residencesRes.data;
-      let agreements = agreementsRes.data;
-      const employees = employeesRes.data;
+      // Validate API responses
+      const residences = Array.isArray(residencesRes?.data) ? residencesRes.data : [];
+      let agreements = Array.isArray(agreementsRes?.data) ? agreementsRes.data : [];
+      const employees = Array.isArray(employeesRes?.data) ? employeesRes.data : [];
+      
+      console.log('📊 API Response Validation:', {
+        residencesCount: residences.length,
+        agreementsCount: agreements.length,
+        employeesCount: employees.length,
+        renewalAlertsCount: Array.isArray(renewalAlertsRes?.data) ? renewalAlertsRes.data.length : 0,
+        renewalAlertsType: typeof renewalAlertsRes?.data,
+        renewalAlertsIsArray: Array.isArray(renewalAlertsRes?.data),
+      });
 
       // CRITICAL FIX: Strict numerical parsing immediately after fetch
       // Convert all financial fields to numbers before any aggregation
@@ -275,7 +295,12 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
       });
 
       // Get current date once for use throughout the function
-      const today = dayjs();
+      // Use IST as the reference timezone (UTC+5:30) for all date calculations
+      const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
+      
+      // DEBUG: Log the current date being used for comparisons
+      console.log('📅 Current Date (IST) being used for renewal checks:', today.format('DD-MM-YYYY'));
+      console.log('📅 Current Date (IST) ISO format:', today.format('YYYY-MM-DD'));
 
       // CRITICAL: Calculate financial totals BEFORE applying timeline filter
       // Financial totals should reflect ALL active agreements, not just those in the timeline
@@ -594,7 +619,18 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
 
       const totalProperties = activeResidences.length;
 
-      const upcomingRenewals = renewalAlertsRes.data.length;
+      // Safely get upcoming renewals count
+      const upcomingRenewals = Array.isArray(renewalAlertsRes?.data) 
+        ? renewalAlertsRes.data.length 
+        : 0;
+      
+      console.log('📈 Stats Calculation:', {
+        totalProperties,
+        upcomingRenewals,
+        activeResidencesCount: activeResidences.length,
+        totalResidences: residences.length,
+        renewalAlertsData: renewalAlertsRes?.data,
+      });
 
       // ============================================
       // CALCULATION VERIFICATION AUDIT
@@ -624,6 +660,14 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
           : 0;
         return sum + advance;
       }, 0);
+      
+      console.log('💰 Financial Totals Calculation:', {
+        allActiveAgreementsCount: allActiveAgreements.length,
+        totalMonthlyRent,
+        totalAdvanceLocked,
+        sampleRent: allActiveAgreements[0]?.agreement_monthly_rent_amount,
+        sampleAdvance: allActiveAgreements[0]?.agreement_advance_amount,
+      });
 
       // Verification logging
       console.log('✅ CALCULATION VERIFICATION - Total Monthly Rent & Advance:', {
@@ -684,10 +728,11 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
       // Logic: Past Due (before today) OR Nearing Due (within 30 days)
       // ============================================
       
-      // Calculate agreements needing review (Past Due + Nearing Due within 30 days)
+      // Calculate agreements needing review (Past Due + Nearing Due within 90 days)
       // Use robust date parser to handle Excel serial dates and various formats
       // VERIFIED: Using agreement_renewal_due_date field from agreement_master
-      const thirtyDaysFromNow = today.add(30, 'day');
+      // 'today' is already declared above with IST timezone
+      const ninetyDaysFromNow = today.add(90, 'day');
       
       const agreementsNeedingReviewList = agreements.filter(agreement => {
         const renewalDueDate = agreement.agreement_renewal_due_date;
@@ -702,9 +747,9 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         
         // Past Due: renewal due date has passed (before today)
         const isPastDue = dueDate.isBefore(today, 'day');
-        // Nearing Due: within next 30 days (today or later, but within 30 days)
+        // Nearing Due: within next 90 days (today or later, but within 90 days)
         const isNearingDue = (dueDate.isSame(today, 'day') || dueDate.isAfter(today, 'day')) 
-          && dueDate.isBefore(thirtyDaysFromNow.add(1, 'day'), 'day');
+          && dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day');
         
         return isPastDue || isNearingDue;
       });
@@ -718,41 +763,53 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         if (!dueDate || !dueDate.isValid()) return false;
         return dueDate.isBefore(today, 'day');
       });
+      
+      // Debug log first few past due agreements
+      pastDueAgreements.slice(0, 3).forEach(agreement => {
+        const dueDate = parseDateFromAPI(agreement.agreement_renewal_due_date);
+        if (dueDate && dueDate.isValid()) {
+          console.log(`🔴 Past Due Agreement: ${agreement.agreement_id}, Due Date: ${dueDate.format('DD-MM-YYYY')}, Today: ${today.format('DD-MM-YYYY')}`);
+        }
+      });
 
-      const nearingDueAgreements = agreementsNeedingReviewList.filter(agreement => {
+      const dueWithin90Agreements = agreementsNeedingReviewList.filter(agreement => {
         const renewalDueDate = agreement.agreement_renewal_due_date;
         if (!renewalDueDate && renewalDueDate !== 0) return false;
         const dueDate = parseDateFromAPI(renewalDueDate);
         if (!dueDate || !dueDate.isValid()) return false;
         return (dueDate.isSame(today, 'day') || dueDate.isAfter(today, 'day')) 
-          && dueDate.isBefore(thirtyDaysFromNow.add(1, 'day'), 'day');
+          && dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day');
       });
 
-      console.log('🔔 Agreements Needing Review Debug (Scenario A):', {
+      console.log('🔔 Agreements Needing Review Debug:', {
         totalAgreements: agreements.length,
         agreementsNeedingReview: agreementsNeedingReviewList.length,
         pastDueCount: pastDueAgreements.length,
-        nearingDueCount: nearingDueAgreements.length,
-        today: today.format('DD-MM-YYYY'),
-        thirtyDaysFromNow: thirtyDaysFromNow.format('DD-MM-YYYY'),
+        dueIn90Count: dueWithin90Agreements.length,
+        todayIST: today.format('DD-MM-YYYY'),
+        ninetyDaysFromNow: ninetyDaysFromNow.format('DD-MM-YYYY'),
         sampleAgreement: agreementsNeedingReviewList[0] ? {
           id: agreementsNeedingReviewList[0].agreement_id,
           renewalDueDateRaw: agreementsNeedingReviewList[0].agreement_renewal_due_date,
           renewalDueDateParsed: parseDateFromAPI(agreementsNeedingReviewList[0].agreement_renewal_due_date)?.format('DD-MM-YYYY'),
           isPastDue: pastDueAgreements.includes(agreementsNeedingReviewList[0]),
-          isNearingDue: nearingDueAgreements.includes(agreementsNeedingReviewList[0]),
+          isNearingDue: dueWithin90Agreements.includes(agreementsNeedingReviewList[0]),
         } : null,
         pastDueSample: pastDueAgreements.slice(0, 3).map(a => ({
           id: a.agreement_id,
           renewalDueDate: parseDateFromAPI(a.agreement_renewal_due_date)?.format('DD-MM-YYYY'),
         })),
-        nearingDueSample: nearingDueAgreements.slice(0, 3).map(a => ({
+        nearingDueSample: dueWithin90Agreements.slice(0, 3).map(a => ({
           id: a.agreement_id,
           renewalDueDate: parseDateFromAPI(a.agreement_renewal_due_date)?.format('DD-MM-YYYY'),
         })),
       });
 
       setAgreementsNeedingReview(agreementsNeedingReviewList.length);
+      setRenewalBuckets({
+        dueIn90: dueWithin90Agreements.length,
+        pastDue: pastDueAgreements.length,
+      });
 
       // Final validation and type coercion before setting state
       // Ensure all values are valid numbers, defaulting to 0 if invalid
@@ -770,16 +827,16 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         : 0;
 
       // Debug: Log the final values being set to state
-      console.log('Final Stats Values Being Set to State:', {
+      console.log('✅ Final Stats Values Being Set to State:', {
         totalProperties: validatedTotalProperties,
         upcomingRenewals: validatedUpcomingRenewals,
         totalMonthlyRent: validatedTotalMonthlyRent,
         totalAdvanceLocked: validatedTotalAdvanceLocked,
         rawValues: {
-        totalProperties,
-        upcomingRenewals,
-        totalMonthlyRent,
-        totalAdvanceLocked,
+          totalProperties,
+          upcomingRenewals,
+          totalMonthlyRent,
+          totalAdvanceLocked,
         },
         types: {
           totalProperties: typeof totalProperties,
@@ -789,12 +846,18 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         },
       });
 
-      setStats({
-        totalProperties: validatedTotalProperties,
-        upcomingRenewals: validatedUpcomingRenewals,
-        totalMonthlyRent: validatedTotalMonthlyRent,
-        totalAdvanceLocked: validatedTotalAdvanceLocked,
-      });
+      // Set stats IMMEDIATELY after calculation to ensure they're set even if later code errors
+      try {
+        setStats({
+          totalProperties: validatedTotalProperties,
+          upcomingRenewals: validatedUpcomingRenewals,
+          totalMonthlyRent: validatedTotalMonthlyRent,
+          totalAdvanceLocked: validatedTotalAdvanceLocked,
+        });
+        console.log('✅ Stats successfully set to state');
+      } catch (statsError) {
+        console.error('❌ Error setting stats:', statsError);
+      }
 
       // Calculate rent change analysis (compare Renewed agreements with their original rent)
       const renewedAgreements = agreements.filter(a => a.agreement_status === 'Renewed');
@@ -1011,7 +1074,13 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
       // Set recommendations
       setRecommendations(recommendationsRes.data.recommendations || []);
     } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
+      console.error('❌ Failed to fetch dashboard data:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
+      // Don't reset stats on error - keep previous values
     } finally {
       setLoading(false);
     }
@@ -1910,13 +1979,33 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
             >
               <Statistic
                 title="Upcoming Renewals Alert"
-                value={stats.upcomingRenewals}
+              value={stats.upcomingRenewals}
                 prefix={<AlertOutlined />}
                 valueStyle={{ color: '#E87103', fontSize: '28px', fontWeight: 'bold' }}
               />
-              <Paragraph style={{ marginTop: '8px', marginBottom: 0, fontSize: '12px', color: '#595959' }}>
-                Within next 90 days
-              </Paragraph>
+            <Paragraph style={{ marginTop: '8px', marginBottom: 0, fontSize: '12px', color: '#595959' }}>
+              Within next 90 days
+            </Paragraph>
+            <Paragraph style={{ marginTop: '4px', marginBottom: 0, fontSize: '12px', color: '#595959' }}>
+              <Typography.Link
+                onClick={() => onNavigateToAgreements && onNavigateToAgreements('due90')}
+                disabled={!renewalBuckets.dueIn90}
+              >
+                Due ≤ 90 days: {renewalBuckets.dueIn90}
+              </Typography.Link>
+            </Paragraph>
+            <Paragraph style={{ marginTop: '4px', marginBottom: 0, fontSize: '12px', color: '#d4380d' }}>
+              <Typography.Link
+                onClick={() => onNavigateToAgreements && onNavigateToAgreements('pastDue')}
+                disabled={!renewalBuckets.pastDue}
+                style={{ color: renewalBuckets.pastDue ? '#d4380d' : '#8c8c8c' }}
+              >
+                Past due: {renewalBuckets.pastDue}
+              </Typography.Link>
+            </Paragraph>
+            <Paragraph style={{ marginTop: '8px', marginBottom: 0, fontSize: '10px', color: '#8c8c8c', borderTop: '1px solid #f0f0f0', paddingTop: '8px' }}>
+              Current Date (IST): {dayjs.tz(dayjs(), 'Asia/Kolkata').format('DD-MM-YYYY')}
+            </Paragraph>
             </Card>
           </Col>
           <Col xs={24} sm={12} md={8} lg={6} xl={4}>
@@ -1999,6 +2088,9 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                 {agreementsNeedingReview > 0 
                   ? 'Click to view details' 
                   : 'All agreements up to date'}
+              </Paragraph>
+              <Paragraph style={{ marginTop: '4px', marginBottom: 0, fontSize: '10px', color: '#8c8c8c' }}>
+                Today (IST): {dayjs.tz(dayjs(), 'Asia/Kolkata').format('DD-MM-YYYY')}
               </Paragraph>
             </Card>
           </Col>
