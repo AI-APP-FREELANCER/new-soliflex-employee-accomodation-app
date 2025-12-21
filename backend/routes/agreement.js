@@ -13,18 +13,29 @@ dayjs.extend(timezone);
 router.use(authenticateToken);
 
 /**
- * Enrich agreement with virtual fields:
- * - computed_renewal_status: 'Past Due' | 'Due Soon' | 'Safe' | 'N/A'
- * - days_until_renewal: integer (negative for past due, positive for future)
- * - formatted_renewal_date: 'YYYY-MM-DD' format or null
+ * Enrich agreement with virtual fields and Normalize Status
  */
 function enrichAgreement(agreement) {
   const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
   const renewalDueDate = agreement.agreement_renewal_due_date;
-  const isInactive = agreement.status === 'inactive' || 
-                     agreement.agreement_status === 'Inactive';
   
-  // If renewal date is missing or agreement is inactive, return N/A
+  // --- ROBUST STATUS NORMALIZATION ---
+  // 1. Get raw status from possible fields
+  let rawStatus = agreement.status || agreement.agreement_status || '';
+  // 2. Convert to string, trim whitespace
+  rawStatus = String(rawStatus).trim();
+  // 3. Normalize to Title Case (e.g. "active" -> "Active", "INACTIVE" -> "Inactive")
+  //    This ensures the Frontend sees consistent "Active" or "Inactive" tags.
+  const normalizedStatus = rawStatus.length > 0 
+    ? rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1).toLowerCase() 
+    : 'Active'; // Default to Active if missing
+
+  // Overwrite with clean status
+  agreement.agreement_status = normalizedStatus;
+
+  const isInactive = normalizedStatus === 'Inactive';
+  
+  // If renewal date is missing or agreement is inactive, return N/A for renewal logic
   if (!renewalDueDate || isInactive) {
     return {
       ...agreement,
@@ -34,7 +45,7 @@ function enrichAgreement(agreement) {
     };
   }
   
-  // Parse renewal date
+  // Parse renewal date robustly
   let dueDate;
   try {
     // Try parsing as ISO string first
@@ -44,22 +55,11 @@ function enrichAgreement(agreement) {
       dueDate = dayjs(renewalDueDate, 'YYYY-MM-DD', true).tz('Asia/Kolkata').startOf('day');
     }
   } catch (error) {
-    // If parsing fails, return N/A
-    return {
-      ...agreement,
-      computed_renewal_status: 'N/A',
-      days_until_renewal: null,
-      formatted_renewal_date: null
-    };
+    return { ...agreement, computed_renewal_status: 'N/A', days_until_renewal: null };
   }
   
   if (!dueDate.isValid()) {
-    return {
-      ...agreement,
-      computed_renewal_status: 'N/A',
-      days_until_renewal: null,
-      formatted_renewal_date: null
-    };
+    return { ...agreement, computed_renewal_status: 'N/A', days_until_renewal: null };
   }
   
   // Calculate days until renewal (negative for past due)
@@ -67,14 +67,12 @@ function enrichAgreement(agreement) {
   const ninetyDaysFromNow = today.add(90, 'day');
   
   // Determine renewal status
-  let computedStatus;
+  let computedStatus = 'Safe';
   if (dueDate.isBefore(today, 'day')) {
     computedStatus = 'Past Due';
   } else if (dueDate.isSame(today, 'day') || 
              (dueDate.isAfter(today, 'day') && dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day'))) {
     computedStatus = 'Due Soon';
-  } else {
-    computedStatus = 'Safe';
   }
   
   return {
@@ -85,32 +83,36 @@ function enrichAgreement(agreement) {
   };
 }
 
-// GET all agreements with robust server-side filtering
+// GET all agreements with Server-Side Filtering override
 router.get('/', (req, res) => {
   try {
-    // CRITICAL: Always fetch 'all' to bypass reader bugs
+    // 1. ALWAYS fetch ALL data to bypass Excel Reader bugs
     let agreements = excelReader.getAgreements('all');
     
-    // 1. Enrich FIRST so we can filter by computed status
+    // 2. Enrich & Normalize FIRST
     agreements = agreements.map(enrichAgreement);
-    
-    // 2. Manual Status Filter (Case-Insensitive)
+
+    // 3. Manual Status Filter (Robust Case-Insensitive)
     if (req.query.status && req.query.status.toLowerCase() !== 'all') {
-      const targetStatus = req.query.status.trim().toLowerCase();
+      const targetStatus = req.query.status.trim().toLowerCase(); // e.g. 'active'
       agreements = agreements.filter(a => {
-        const s = String(a.agreement_status || a.status || '').trim().toLowerCase();
-        return s === targetStatus;
+        // Compare against the normalized status we created in enrichAgreement
+        return a.agreement_status.toLowerCase() === targetStatus;
       });
     }
     
-    // 3. Manual Residence Filter
+    // 4. Filter by residence_id
     if (req.query.residence_id) {
-      agreements = agreements.filter(a => a.agreement_residence_id === req.query.residence_id);
+      agreements = agreements.filter(a => 
+        a.agreement_residence_id === req.query.residence_id
+      );
     }
     
-    // 4. Manual Renewal Status Filter
+    // 5. Filter by renewal_status
     if (req.query.renewal_status) {
-      agreements = agreements.filter(a => a.computed_renewal_status === req.query.renewal_status);
+      agreements = agreements.filter(a => 
+        a.computed_renewal_status === req.query.renewal_status
+      );
     }
     
     res.json(agreements);
@@ -120,13 +122,14 @@ router.get('/', (req, res) => {
   }
 });
 
-// GET active agreements only (legacy endpoint for backward compatibility)
+// GET active agreements only (Legacy support)
 router.get('/active', (req, res) => {
   try {
-    const agreements = excelReader.getAgreements('active');
-    // Enrich agreements with virtual fields
-    const enrichedAgreements = agreements.map(enrichAgreement);
-    res.json(enrichedAgreements);
+    const agreements = excelReader.getAgreements('all');
+    const enriched = agreements.map(enrichAgreement);
+    // Filter using our robust normalized status
+    const activeOnly = enriched.filter(a => a.agreement_status === 'Active');
+    res.json(activeOnly);
   } catch (error) {
     console.error('Error fetching active agreements:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -143,25 +146,21 @@ router.get('/:id', (req, res) => {
       return res.status(404).json({ error: 'Agreement not found' });
     }
     
-    // Enrich agreement with virtual fields
-    const enrichedAgreement = enrichAgreement(agreement);
-    res.json(enrichedAgreement);
+    res.json(enrichAgreement(agreement));
   } catch (error) {
     console.error('Error fetching agreement:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET agreements by residence_id (includes all statuses for historical reference)
+// GET agreements by residence_id
 router.get('/residence/:residenceId', (req, res) => {
   try {
-    const agreements = excelReader.getAgreements('all'); // Get all for historical reference
+    const agreements = excelReader.getAgreements('all');
     const residenceAgreements = agreements.filter(a => 
       a.agreement_residence_id === req.params.residenceId
     );
-    // Enrich agreements with virtual fields
-    const enrichedAgreements = residenceAgreements.map(enrichAgreement);
-    res.json(enrichedAgreements);
+    res.json(residenceAgreements.map(enrichAgreement));
   } catch (error) {
     console.error('Error fetching agreements by residence:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -173,7 +172,6 @@ router.post('/', (req, res) => {
   try {
     const data = req.body;
     
-    // Generate agreement_id if not provided
     if (!data.agreement_id) {
       const agreements = excelReader.getAgreements();
       const maxId = agreements.length > 0 
@@ -185,7 +183,6 @@ router.post('/', (req, res) => {
       data.agreement_id = `agreement_${String(maxId + 1).padStart(3, '0')}`;
     }
     
-    // Set default status if not provided
     if (!data.agreement_status) {
       data.agreement_status = 'Active';
     }
@@ -198,13 +195,11 @@ router.post('/', (req, res) => {
   }
 });
 
-// PUT update agreement (no deletion, only status updates and field edits)
+// PUT update agreement
 router.put('/:id', (req, res) => {
   try {
     const agreementId = req.params.id;
     const updates = req.body;
-    
-    // Prevent deletion of agreement_id
     delete updates.agreement_id;
     
     const updatedAgreement = excelReader.updateAgreement(agreementId, updates);
@@ -220,7 +215,7 @@ router.put('/:id', (req, res) => {
   }
 });
 
-// PATCH deactivate agreement (soft delete)
+// PATCH deactivate agreement
 router.patch('/:id/deactivate', (req, res) => {
   try {
     const agreementId = req.params.id;
@@ -240,4 +235,3 @@ router.patch('/:id/deactivate', (req, res) => {
 });
 
 module.exports = router;
-

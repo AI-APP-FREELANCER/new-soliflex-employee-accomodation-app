@@ -6,21 +6,24 @@ const excelReader = require('../data/excelReader');
 // All routes require authentication
 router.use(authenticateToken);
 
-// GET all employees with robust server-side filtering
+// GET all employees with optional status filter
 router.get('/', (req, res) => {
   try {
-    // CRITICAL: Always fetch 'all'
+    // CRITICAL FIX: Always fetch 'all' to ensure we have the full dataset
     let employees = excelReader.getEmployees('all');
     
-    // Manual Status Filter
+    // Apply Status Filter Manually
     if (req.query.status && req.query.status.toLowerCase() !== 'all') {
       const targetStatus = req.query.status.trim().toLowerCase();
+      
       employees = employees.filter(e => {
         const s = String(e.status || e.employee_status || '').trim().toLowerCase();
-        // Treat empty/null as 'active' for backward compatibility
+        
+        // Handle "Active" logic: matches 'active', empty string, or null/undefined
         if (targetStatus === 'active') {
           return s === 'active' || s === '' || s === 'null' || s === 'undefined';
         }
+        // Handle other statuses (e.g., 'inactive')
         return s === targetStatus;
       });
     }
@@ -31,6 +34,7 @@ router.get('/', (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+    
 
 // GET employee by ID
 router.get('/:id', (req, res) => {
