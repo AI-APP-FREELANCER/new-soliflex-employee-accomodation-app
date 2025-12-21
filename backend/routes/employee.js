@@ -6,9 +6,10 @@ const excelReader = require('../data/excelReader');
 // All routes require authentication
 router.use(authenticateToken);
 
-// GET all employees with optional status filter
+// GET all employees with robust server-side filtering
 router.get('/', (req, res) => {
   try {
+    // CRITICAL: Always fetch 'all'
     let employees = excelReader.getEmployees('all');
     
     // Manual Status Filter
@@ -16,9 +17,9 @@ router.get('/', (req, res) => {
       const targetStatus = req.query.status.trim().toLowerCase();
       employees = employees.filter(e => {
         const s = String(e.status || e.employee_status || '').trim().toLowerCase();
-        // Handle 'active' logic including legacy empty fields
+        // Treat empty/null as 'active' for backward compatibility
         if (targetStatus === 'active') {
-          return s === 'active' || s === '';
+          return s === 'active' || s === '' || s === 'null' || s === 'undefined';
         }
         return s === targetStatus;
       });
@@ -26,7 +27,8 @@ router.get('/', (req, res) => {
     
     res.json(employees);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error fetching employees:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

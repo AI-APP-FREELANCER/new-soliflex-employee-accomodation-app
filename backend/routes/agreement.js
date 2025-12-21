@@ -88,13 +88,13 @@ function enrichAgreement(agreement) {
 // GET all agreements with robust server-side filtering
 router.get('/', (req, res) => {
   try {
-    // 1. ALWAYS fetch ALL data. Do not trust the reader to filter.
+    // CRITICAL: Always fetch 'all' to bypass reader bugs
     let agreements = excelReader.getAgreements('all');
     
-    // 2. Enrich with virtual fields (Dates & Status) BEFORE filtering
+    // 1. Enrich FIRST so we can filter by computed status
     agreements = agreements.map(enrichAgreement);
     
-    // 3. Apply Status Filter (Case-Insensitive)
+    // 2. Manual Status Filter (Case-Insensitive)
     if (req.query.status && req.query.status.toLowerCase() !== 'all') {
       const targetStatus = req.query.status.trim().toLowerCase();
       agreements = agreements.filter(a => {
@@ -103,15 +103,14 @@ router.get('/', (req, res) => {
       });
     }
     
-    // 4. Apply Renewal Status Filter (Past Due / Due Soon)
-    if (req.query.renewal_status) {
-      const targetRenewal = req.query.renewal_status;
-      agreements = agreements.filter(a => a.computed_renewal_status === targetRenewal);
-    }
-    
-    // 5. Apply Residence Filter
+    // 3. Manual Residence Filter
     if (req.query.residence_id) {
       agreements = agreements.filter(a => a.agreement_residence_id === req.query.residence_id);
+    }
+    
+    // 4. Manual Renewal Status Filter
+    if (req.query.renewal_status) {
+      agreements = agreements.filter(a => a.computed_renewal_status === req.query.renewal_status);
     }
     
     res.json(agreements);
