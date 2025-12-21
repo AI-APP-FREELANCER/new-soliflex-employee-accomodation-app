@@ -2,15 +2,115 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth');
 const excelReader = require('../data/excelReader');
+const dayjs = require('dayjs');
+const utc = require('dayjs/plugin/utc');
+const timezone = require('dayjs/plugin/timezone');
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 // All routes require authentication
 router.use(authenticateToken);
 
-// GET all agreements with optional status filter
+/**
+ * Enrich agreement with virtual fields:
+ * - computed_renewal_status: 'Past Due' | 'Due Soon' | 'Safe' | 'N/A'
+ * - days_until_renewal: integer (negative for past due, positive for future)
+ * - formatted_renewal_date: 'YYYY-MM-DD' format or null
+ */
+function enrichAgreement(agreement) {
+  const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
+  const renewalDueDate = agreement.agreement_renewal_due_date;
+  const isInactive = agreement.status === 'inactive' || 
+                     agreement.agreement_status === 'Inactive';
+  
+  // If renewal date is missing or agreement is inactive, return N/A
+  if (!renewalDueDate || isInactive) {
+    return {
+      ...agreement,
+      computed_renewal_status: 'N/A',
+      days_until_renewal: null,
+      formatted_renewal_date: null
+    };
+  }
+  
+  // Parse renewal date
+  let dueDate;
+  try {
+    // Try parsing as ISO string first
+    dueDate = dayjs.tz(renewalDueDate, 'Asia/Kolkata').startOf('day');
+    if (!dueDate.isValid()) {
+      // Try parsing as YYYY-MM-DD format
+      dueDate = dayjs(renewalDueDate, 'YYYY-MM-DD', true).tz('Asia/Kolkata').startOf('day');
+    }
+  } catch (error) {
+    // If parsing fails, return N/A
+    return {
+      ...agreement,
+      computed_renewal_status: 'N/A',
+      days_until_renewal: null,
+      formatted_renewal_date: null
+    };
+  }
+  
+  if (!dueDate.isValid()) {
+    return {
+      ...agreement,
+      computed_renewal_status: 'N/A',
+      days_until_renewal: null,
+      formatted_renewal_date: null
+    };
+  }
+  
+  // Calculate days until renewal (negative for past due)
+  const daysUntilRenewal = dueDate.diff(today, 'day');
+  const ninetyDaysFromNow = today.add(90, 'day');
+  
+  // Determine renewal status
+  let computedStatus;
+  if (dueDate.isBefore(today, 'day')) {
+    computedStatus = 'Past Due';
+  } else if (dueDate.isSame(today, 'day') || 
+             (dueDate.isAfter(today, 'day') && dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day'))) {
+    computedStatus = 'Due Soon';
+  } else {
+    computedStatus = 'Safe';
+  }
+  
+  return {
+    ...agreement,
+    computed_renewal_status: computedStatus,
+    days_until_renewal: daysUntilRenewal,
+    formatted_renewal_date: dueDate.format('YYYY-MM-DD')
+  };
+}
+
+// GET all agreements with optional status filter and server-side filtering
 router.get('/', (req, res) => {
   try {
     const statusFilter = req.query.status || 'active'; // Default to 'active'
-    const agreements = excelReader.getAgreements(statusFilter);
+    let agreements = excelReader.getAgreements(statusFilter);
+    
+    // Apply server-side filtering
+    const { residence_id, renewal_status } = req.query;
+    
+    // Filter by residence_id if provided
+    if (residence_id) {
+      agreements = agreements.filter(a => 
+        a.agreement_residence_id === residence_id
+      );
+    }
+    
+    // Enrich agreements with virtual fields
+    agreements = agreements.map(enrichAgreement);
+    
+    // Filter by renewal_status if provided (must be done after enrichment)
+    if (renewal_status) {
+      agreements = agreements.filter(a => 
+        a.computed_renewal_status === renewal_status
+      );
+    }
+    
     res.json(agreements);
   } catch (error) {
     console.error('Error fetching agreements:', error);
@@ -22,7 +122,9 @@ router.get('/', (req, res) => {
 router.get('/active', (req, res) => {
   try {
     const agreements = excelReader.getAgreements('active');
-    res.json(agreements);
+    // Enrich agreements with virtual fields
+    const enrichedAgreements = agreements.map(enrichAgreement);
+    res.json(enrichedAgreements);
   } catch (error) {
     console.error('Error fetching active agreements:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -32,14 +134,16 @@ router.get('/active', (req, res) => {
 // GET agreement by ID
 router.get('/:id', (req, res) => {
   try {
-    const agreements = excelReader.getAgreements();
+    const agreements = excelReader.getAgreements('all');
     const agreement = agreements.find(a => a.agreement_id === req.params.id);
     
     if (!agreement) {
       return res.status(404).json({ error: 'Agreement not found' });
     }
     
-    res.json(agreement);
+    // Enrich agreement with virtual fields
+    const enrichedAgreement = enrichAgreement(agreement);
+    res.json(enrichedAgreement);
   } catch (error) {
     console.error('Error fetching agreement:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -53,7 +157,9 @@ router.get('/residence/:residenceId', (req, res) => {
     const residenceAgreements = agreements.filter(a => 
       a.agreement_residence_id === req.params.residenceId
     );
-    res.json(residenceAgreements);
+    // Enrich agreements with virtual fields
+    const enrichedAgreements = residenceAgreements.map(enrichAgreement);
+    res.json(enrichedAgreements);
   } catch (error) {
     console.error('Error fetching agreements by residence:', error);
     res.status(500).json({ error: 'Internal server error' });

@@ -15,6 +15,8 @@ import {
   Modal,
   Card,
   Dropdown,
+  Row,
+  Col,
 } from 'antd';
 import { PlusOutlined, EditOutlined, ReloadOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined } from '@ant-design/icons';
 import { agreementAPI, residenceAPI } from '../services/api';
@@ -43,7 +45,9 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
   const [isRenewal, setIsRenewal] = useState(false);
   const [pageSize, setPageSize] = useState(10);
   const [searchText, setSearchText] = useState('');
-  const [reviewFilter, setReviewFilter] = useState(null); // null | 'review' | 'due90' | 'pastDue'
+  const [statusFilter, setStatusFilter] = useState('active'); // 'active' | 'inactive' | 'all'
+  const [renewalStatusFilter, setRenewalStatusFilter] = useState(null); // 'Past Due' | 'Due Soon' | 'Safe' | null
+  const [residenceIdFilter, setResidenceIdFilter] = useState(null); // string | null
   const [isMobile, setIsMobile] = useState(false);
   const [form] = Form.useForm();
   const [refundForm] = Form.useForm();
@@ -62,21 +66,41 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
   }, []);
 
   useEffect(() => {
-    fetchAgreements();
     fetchResidences();
   }, []);
 
+  // Fetch agreements when filters change
+  useEffect(() => {
+    fetchAgreements();
+  }, [statusFilter, renewalStatusFilter, residenceIdFilter]);
+
   // Handle initial filter from navigation
   useEffect(() => {
-    if (['review', 'due90', 'pastDue'].includes(initialFilter)) {
-      setReviewFilter(initialFilter);
+    if (initialFilter === 'pastDue') {
+      setRenewalStatusFilter('Past Due');
+    } else if (initialFilter === 'due90') {
+      setRenewalStatusFilter('Due Soon');
+    } else if (initialFilter === 'review') {
+      setRenewalStatusFilter(null); // Show all
     }
   }, [initialFilter]);
 
   const fetchAgreements = async () => {
     setLoading(true);
     try {
-      const response = await agreementAPI.getAll();
+      // Build query parameters from filter states
+      const params = {};
+      if (statusFilter && statusFilter !== 'all') {
+        params.status = statusFilter;
+      }
+      if (renewalStatusFilter) {
+        params.renewal_status = renewalStatusFilter;
+      }
+      if (residenceIdFilter) {
+        params.residence_id = residenceIdFilter;
+      }
+      
+      const response = await agreementAPI.getAll(params);
       
       // CRITICAL FIX: Strict numerical parsing immediately after fetch
       // Convert all financial fields to numbers before storing in state
@@ -430,26 +454,16 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
     }
   }, [renewalStartDate, renewalModalVisible, renewalForm]);
 
+  // Calculate renewal counts from backend computed fields
   const renewalCounts = useMemo(() => {
-    const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
-    const ninetyDaysFromNow = today.add(90, 'day');
-    
-    // DEBUG: Log current date being used (only once per render)
-    console.log('📅 Agreements Component - Current Date (IST):', today.format('DD-MM-YYYY'));
-    
     let pastDue = 0;
     let due90 = 0;
 
     agreements.forEach(agreement => {
-      const renewalDueDate = agreement.agreement_renewal_due_date;
-      if (!renewalDueDate && renewalDueDate !== 0) return;
-      const dueDate = parseDateFromAPI(renewalDueDate);
-      if (!dueDate || !dueDate.isValid()) return;
-
-      if (dueDate.isBefore(today, 'day')) {
+      const renewalStatus = agreement.computed_renewal_status;
+      if (renewalStatus === 'Past Due') {
         pastDue += 1;
-      } else if ((dueDate.isSame(today, 'day') || dueDate.isAfter(today, 'day')) &&
-        dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day')) {
+      } else if (renewalStatus === 'Due Soon') {
         due90 += 1;
       }
     });
@@ -457,49 +471,11 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
     return { pastDue, due90 };
   }, [agreements]);
 
-  // Filter agreements based on search text and review filter
+  // Filter agreements based on search text only (server-side filtering handles status/renewal/residence)
   const filteredAgreements = useMemo(() => {
     let result = agreements;
 
-    // Apply review filter (IST-based comparisons)
-    if (reviewFilter) {
-      // Ensure we are using the correct reference time (IST Start of Day)
-      const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
-      const ninetyDaysFromNow = today.add(90, 'day');
-      
-      console.log(`[Agreements] Filtering by: ${reviewFilter}`);
-      console.log(`[Agreements] Ref Date (Today IST): ${today.format('YYYY-MM-DD')}`);
-      
-      result = result.filter(agreement => {
-        const renewalDueDate = agreement.agreement_renewal_due_date;
-        
-        // skip if date is missing
-        if (!renewalDueDate && renewalDueDate !== 0) return false;
-        
-        // Use robust date parser
-        const dueDate = parseDateFromAPI(renewalDueDate);
-        
-        if (!dueDate || !dueDate.isValid()) {
-          // console.warn('Invalid date for agreement:', agreement.agreement_id);
-          return false;
-        }
-        
-        // Logic must match DashboardHome.js exactly
-        const isPastDue = dueDate.isBefore(today, 'day');
-        const isNearingDue = (dueDate.isSame(today, 'day') || dueDate.isAfter(today, 'day')) 
-          && dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day');
-        
-        if (reviewFilter === 'pastDue') return isPastDue;
-        if (reviewFilter === 'due90') return isNearingDue && !isPastDue;
-        if (reviewFilter === 'review') return isPastDue || isNearingDue;
-        
-        return true;
-      });
-      
-      console.log(`[Agreements] Filtered Result Count: ${result.length}`);
-    }
-
-    // Apply search text filter
+    // Apply search text filter (client-side for quick search)
     if (searchText.trim()) {
       const lowerSearch = searchText.toLowerCase().trim();
       result = result.filter(agreement => {
@@ -517,7 +493,7 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
     }
 
     return result;
-  }, [searchText, agreements, reviewFilter]);
+  }, [searchText, agreements]);
 
   // Export handlers
   const handleExportPDF = async () => {
@@ -583,7 +559,43 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
       title: 'Renewal Due Date',
       dataIndex: 'agreement_renewal_due_date',
       key: 'agreement_renewal_due_date',
-      render: (date) => date ? formatDateForDisplay(date) : 'N/A',
+      render: (date, record) => {
+        if (!date) return 'N/A';
+        const formattedDate = formatDateForDisplay(date);
+        const daysUntilRenewal = record.days_until_renewal;
+        
+        if (daysUntilRenewal === null || daysUntilRenewal === undefined) {
+          return formattedDate;
+        }
+        
+        if (daysUntilRenewal < 0) {
+          return `${formattedDate} (${Math.abs(daysUntilRenewal)} days overdue)`;
+        } else if (daysUntilRenewal === 0) {
+          return `${formattedDate} (Due today)`;
+        } else {
+          return `${formattedDate} (${daysUntilRenewal} days left)`;
+        }
+      },
+    },
+    {
+      title: 'Renewal Status',
+      dataIndex: 'computed_renewal_status',
+      key: 'computed_renewal_status',
+      render: (status) => {
+        if (!status || status === 'N/A') {
+          return <Tag color="default">N/A</Tag>;
+        }
+        if (status === 'Past Due') {
+          return <Tag color="red">Past Due</Tag>;
+        }
+        if (status === 'Due Soon') {
+          return <Tag color="orange">Due Soon</Tag>;
+        }
+        if (status === 'Safe') {
+          return <Tag color="green">Safe</Tag>;
+        }
+        return <Tag>{status}</Tag>;
+      },
     },
     {
       title: 'Monthly Rent',
@@ -616,18 +628,9 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
         const status = (record.agreement_status || '').toString().trim();
         const isActive = status.toLowerCase() === 'active';
         
-        // Check if renewal is due (within 90 days or past due) - using IST
-        const renewalDueDate = record.agreement_renewal_due_date;
-        let isRenewalDue = false;
-        if (renewalDueDate) {
-          const dueDate = parseDateFromAPI(renewalDueDate);
-          if (dueDate && dueDate.isValid()) {
-            const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
-            const ninetyDaysFromNow = today.add(90, 'day');
-            // Past due or within 90 days
-            isRenewalDue = dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day');
-          }
-        }
+        // Check if renewal is due using backend computed field
+        const renewalStatus = record.computed_renewal_status;
+        const isRenewalDue = renewalStatus === 'Past Due' || renewalStatus === 'Due Soon';
         
         return (
           <Space>
@@ -717,41 +720,88 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
         </Space>
       </div>
 
-      <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-        <Input
-          placeholder="Search by Agreement ID, Residence ID, Monthly Rent, or Advance Amount..."
-          prefix={<SearchOutlined />}
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          allowClear
-          style={{ width: isMobile ? '100%' : '400px' }}
-        />
-        <Space wrap>
-          <Tag color={reviewFilter ? 'blue' : 'default'} style={{ padding: '4px 8px' }}>
-            Renewal Filters
-          </Tag>
-          <Button size="small" type={reviewFilter === 'due90' ? 'primary' : 'default'} onClick={() => setReviewFilter('due90')}>
-            Due ≤ 90 days ({renewalCounts.due90})
-          </Button>
-          <Button size="small" type={reviewFilter === 'pastDue' ? 'primary' : 'default'} danger={reviewFilter === 'pastDue'} onClick={() => setReviewFilter('pastDue')}>
-            Past due ({renewalCounts.pastDue})
-          </Button>
-          <Button size="small" type={reviewFilter === 'review' ? 'primary' : 'default'} onClick={() => setReviewFilter('review')}>
-            All due/past ({renewalCounts.due90 + renewalCounts.pastDue})
-          </Button>
-          {reviewFilter && (
-            <Button
-              size="small"
-              onClick={() => {
-                setReviewFilter(null);
-                if (onFilterClear) onFilterClear();
-              }}
+      {/* Advanced Filter Bar */}
+      <Card style={{ marginBottom: '16px' }}>
+        <Row gutter={[16, 16]}>
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <div style={{ marginBottom: '8px' }}>
+              <Text strong>Status:</Text>
+            </div>
+            <Select
+              value={statusFilter}
+              onChange={setStatusFilter}
+              style={{ width: '100%' }}
+              placeholder="Select Status"
             >
-              Clear
-            </Button>
+              <Option value="active">Active</Option>
+              <Option value="inactive">Inactive</Option>
+              <Option value="all">All</Option>
+            </Select>
+          </Col>
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <div style={{ marginBottom: '8px' }}>
+              <Text strong>Renewal Urgency:</Text>
+            </div>
+            <Select
+              value={renewalStatusFilter}
+              onChange={setRenewalStatusFilter}
+              style={{ width: '100%' }}
+              placeholder="All"
+              allowClear
+            >
+              <Option value="Past Due">Past Due ({renewalCounts.pastDue})</Option>
+              <Option value="Due Soon">Due Soon ({renewalCounts.due90})</Option>
+              <Option value="Safe">Safe</Option>
+            </Select>
+          </Col>
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <div style={{ marginBottom: '8px' }}>
+              <Text strong>Residence ID:</Text>
+            </div>
+            <Select
+              value={residenceIdFilter}
+              onChange={setResidenceIdFilter}
+              style={{ width: '100%' }}
+              placeholder="Select Residence"
+              showSearch
+              allowClear
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              options={residences.map(r => ({
+                value: r.residence_id,
+                label: `${r.residence_id}${r.residence_door_number ? ` - ${r.residence_door_number}` : ''}`,
+              }))}
+            />
+          </Col>
+          <Col xs={24} sm={12} md={8} lg={6}>
+            <div style={{ marginBottom: '8px' }}>
+              <Text strong>Search:</Text>
+            </div>
+            <Input
+              placeholder="Search by ID, Rent, Advance..."
+              prefix={<SearchOutlined />}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              allowClear
+            />
+          </Col>
+          {(statusFilter !== 'active' || renewalStatusFilter || residenceIdFilter) && (
+            <Col xs={24}>
+              <Button
+                onClick={() => {
+                  setStatusFilter('active');
+                  setRenewalStatusFilter(null);
+                  setResidenceIdFilter(null);
+                  if (onFilterClear) onFilterClear();
+                }}
+              >
+                Clear Filters
+              </Button>
+            </Col>
           )}
-        </Space>
-      </div>
+        </Row>
+      </Card>
 
       <div ref={tableRef}>
         {isMobile ? (
@@ -795,6 +845,44 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
                     <div>
                       <Text strong>Possession Date: </Text>
                       <Text>{formatDateForDisplay(agreement.agreement_possesion_date) || 'N/A'}</Text>
+                    </div>
+                    <div>
+                      <Text strong>Renewal Due Date: </Text>
+                      <Text>
+                        {agreement.agreement_renewal_due_date ? (() => {
+                          const formattedDate = formatDateForDisplay(agreement.agreement_renewal_due_date);
+                          const daysUntilRenewal = agreement.days_until_renewal;
+                          if (daysUntilRenewal === null || daysUntilRenewal === undefined) {
+                            return formattedDate;
+                          }
+                          if (daysUntilRenewal < 0) {
+                            return `${formattedDate} (${Math.abs(daysUntilRenewal)} days overdue)`;
+                          } else if (daysUntilRenewal === 0) {
+                            return `${formattedDate} (Due today)`;
+                          } else {
+                            return `${formattedDate} (${daysUntilRenewal} days left)`;
+                          }
+                        })() : 'N/A'}
+                      </Text>
+                    </div>
+                    <div>
+                      <Text strong>Renewal Status: </Text>
+                      {(() => {
+                        const status = agreement.computed_renewal_status;
+                        if (!status || status === 'N/A') {
+                          return <Tag color="default">N/A</Tag>;
+                        }
+                        if (status === 'Past Due') {
+                          return <Tag color="red">Past Due</Tag>;
+                        }
+                        if (status === 'Due Soon') {
+                          return <Tag color="orange">Due Soon</Tag>;
+                        }
+                        if (status === 'Safe') {
+                          return <Tag color="green">Safe</Tag>;
+                        }
+                        return <Tag>{status}</Tag>;
+                      })()}
                     </div>
                     <div>
                       <Text strong>Status: </Text>

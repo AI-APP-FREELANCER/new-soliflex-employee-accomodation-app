@@ -61,7 +61,14 @@ export const residenceAPI = {
 
 // Agreement APIs
 export const agreementAPI = {
-  getAll: (status = 'active') => api.get(`/agreement?status=${status}`),
+  getAll: (params = {}) => {
+    const queryParams = new URLSearchParams();
+    if (params.status) queryParams.append('status', params.status);
+    if (params.renewal_status) queryParams.append('renewal_status', params.renewal_status);
+    if (params.residence_id) queryParams.append('residence_id', params.residence_id);
+    const queryString = queryParams.toString();
+    return api.get(`/agreement${queryString ? `?${queryString}` : ''}`);
+  },
   getActive: () => api.get('/agreement/active'),
   getById: (id) => api.get(`/agreement/${id}`),
   getByResidence: (residenceId) => api.get(`/agreement/residence/${residenceId}`),
