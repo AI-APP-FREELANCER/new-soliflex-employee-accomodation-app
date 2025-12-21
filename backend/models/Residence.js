@@ -11,7 +11,25 @@ class Residence {
     this.residence_pin_code = data.residence_pin_code || null;
     this.residence_country = data.residence_country || null;
     this.residence_house_count = data.residence_house_count || 0;
-    this.residence_status = data.residence_status || 'Active';
+    
+    // Legacy status field (map to new status)
+    const legacyStatus = data.residence_status || 'Active';
+    this.residence_status = legacyStatus;
+    
+    // Lifecycle Management Fields
+    this.status = (legacyStatus === 'Active' || legacyStatus === 'active') ? 'active' : 'inactive';
+    this.activeDate = data.activeDate || (this.status === 'active' ? new Date().toISOString() : null);
+    this.inactiveDate = data.inactiveDate || (this.status === 'inactive' ? new Date().toISOString() : null);
+    this.statusHistory = data.statusHistory || [];
+    
+    // Initialize status history if not present
+    if (this.statusHistory.length === 0 && this.activeDate) {
+      this.statusHistory.push({
+        status: this.status,
+        date: this.activeDate,
+        reason: 'Initial creation'
+      });
+    }
   }
 }
 

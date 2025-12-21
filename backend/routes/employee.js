@@ -6,10 +6,11 @@ const excelReader = require('../data/excelReader');
 // All routes require authentication
 router.use(authenticateToken);
 
-// GET all employees
+// GET all employees with optional status filter
 router.get('/', (req, res) => {
   try {
-    const employees = excelReader.getEmployees();
+    const statusFilter = req.query.status || 'active'; // Default to 'active'
+    const employees = excelReader.getEmployees(statusFilter);
     res.json(employees);
   } catch (error) {
     console.error('Error fetching employees:', error);
@@ -81,6 +82,25 @@ router.put('/:id', (req, res) => {
     res.json(updatedEmployee);
   } catch (error) {
     console.error('Error updating employee:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PATCH deactivate employee (soft delete)
+router.patch('/:id/deactivate', (req, res) => {
+  try {
+    const employeeId = req.params.id;
+    const reason = req.body.reason || 'Marked inactive by user';
+    
+    const deactivatedEmployee = excelReader.deactivateEmployee(employeeId, reason);
+    
+    if (!deactivatedEmployee) {
+      return res.status(404).json({ error: 'Employee not found' });
+    }
+    
+    res.json(deactivatedEmployee);
+  } catch (error) {
+    console.error('Error deactivating employee:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

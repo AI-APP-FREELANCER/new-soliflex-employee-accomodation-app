@@ -36,6 +36,7 @@ const Residences = () => {
   const [employees, setEmployees] = useState([]);
   const [pageSize, setPageSize] = useState(10);
   const [searchText, setSearchText] = useState('');
+  const [statusFilter, setStatusFilter] = useState('active'); // 'active', 'inactive', 'all'
   const [isMobile, setIsMobile] = useState(false);
   const [form] = Form.useForm();
   const tableRef = useRef(null);
@@ -52,17 +53,13 @@ const Residences = () => {
 
   useEffect(() => {
     fetchResidences();
-  }, []);
+  }, [statusFilter]);
 
   const fetchResidences = async () => {
     setLoading(true);
     try {
-      const response = await residenceAPI.getAll();
-      // Filter to show active residences by default
-      const activeResidences = response.data.filter(
-        r => r.residence_status === 'Active' || r.residence_status === 'active'
-      );
-      setResidences(activeResidences);
+      const response = await residenceAPI.getAll(statusFilter);
+      setResidences(response.data);
     } catch (error) {
       message.error('Failed to fetch residences');
       console.error(error);
@@ -247,11 +244,24 @@ const Residences = () => {
       key: 'residence_house_count',
     },
     {
+      title: 'Owner Name',
+      dataIndex: 'residence_owner_name',
+      key: 'residence_owner_name',
+      render: (name, record) => (
+        <span style={{ 
+          opacity: record.status === 'inactive' ? 0.6 : 1,
+          color: record.status === 'inactive' ? '#8c8c8c' : '#262626'
+        }}>
+          {name || 'N/A'}
+        </span>
+      ),
+    },
+    {
       title: 'Status',
       dataIndex: 'residence_status',
       key: 'residence_status',
-      render: (status) => (
-        <Tag color={status === 'Active' ? 'green' : 'red'}>
+      render: (status, record) => (
+        <Tag color={status === 'Active' || record.status === 'active' ? 'green' : 'red'}>
           {status}
         </Tag>
       ),
@@ -322,7 +332,7 @@ const Residences = () => {
         </Space>
       </div>
 
-      <div style={{ marginBottom: '16px' }}>
+      <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
         <Input
           placeholder="Search by Owner Name, Residence ID, or Address..."
           prefix={<SearchOutlined />}
@@ -331,6 +341,15 @@ const Residences = () => {
           allowClear
           style={{ width: isMobile ? '100%' : '400px' }}
         />
+        <Select
+          value={statusFilter}
+          onChange={setStatusFilter}
+          style={{ width: isMobile ? '100%' : '150px' }}
+        >
+          <Option value="active">Show Active</Option>
+          <Option value="inactive">Show Inactive</Option>
+          <Option value="all">Show All</Option>
+        </Select>
       </div>
 
       <div ref={tableRef}>
@@ -374,9 +393,33 @@ const Residences = () => {
                       <Text>{residence.residence_id}</Text>
                     </div>
                     <div>
-                      <Text strong>Owner: </Text>
-                      <Text>{residence.residence_owner_name || 'N/A'}</Text>
+                      <Text strong>Owner Name: </Text>
+                      <Text style={{ 
+                        color: (residence.status === 'inactive' || residence.residence_status === 'Inactive') ? '#8c8c8c' : '#262626'
+                      }}>
+                        {residence.residence_owner_name || 'N/A'}
+                      </Text>
                     </div>
+                    {residence.residence_owner_id && (
+                      <div>
+                        <Text strong>Owner ID: </Text>
+                        <Text>{residence.residence_owner_id}</Text>
+                      </div>
+                    )}
+                    <div>
+                      <Text strong>Owner Name: </Text>
+                      <Text style={{ 
+                        color: (residence.status === 'inactive' || residence.residence_status === 'Inactive') ? '#8c8c8c' : '#262626'
+                      }}>
+                        {residence.residence_owner_name || 'N/A'}
+                      </Text>
+                    </div>
+                    {residence.residence_owner_id && (
+                      <div>
+                        <Text strong>Owner ID: </Text>
+                        <Text>{residence.residence_owner_id}</Text>
+                      </div>
+                    )}
                     <div>
                       <Text strong>Address: </Text>
                       <Text>{addressParts.join(', ') || 'N/A'}</Text>
@@ -410,6 +453,10 @@ const Residences = () => {
               loading={loading}
               rowKey="residence_id"
               scroll={{ x: 'max-content' }}
+              rowClassName={(record) => {
+                const isInactive = record.status === 'inactive' || record.residence_status === 'Inactive';
+                return isInactive ? 'inactive-row' : '';
+              }}
               pagination={{
                 pageSize: pageSize,
                 showSizeChanger: true,

@@ -13,18 +13,21 @@ router.get('/occupancy', (req, res) => {
     const agreements = excelReader.getAgreements();
     const residences = excelReader.getResidences();
 
-    // Filter active employees and agreements
-    const activeEmployees = employees.filter(e => 
-      e.employee_status === 'Active' || e.employee_status === 'active'
-    );
+    // Filter active employees and agreements with BACKWARD COMPATIBILITY
+    // CRITICAL: A record is ACTIVE if status === 'active' OR status is null/undefined
+    const activeEmployees = employees.filter(e => {
+      const status = e.status || e.employee_status;
+      return !status || status === 'active' || status === 'Active';
+    });
 
     const occupancy = activeEmployees
       .map(employee => {
-        // Find the agreement for this employee
-        const agreement = agreements.find(a => 
-          a.agreement_id === employee.emplyee_allocated_agreement_id &&
-          (a.agreement_status === 'Active' || a.agreement_status === 'active')
-        );
+        // Find the agreement for this employee with backward compatibility
+        const agreement = agreements.find(a => {
+          if (a.agreement_id !== employee.emplyee_allocated_agreement_id) return false;
+          const agreementStatus = a.status || a.agreement_status;
+          return !agreementStatus || agreementStatus === 'active' || agreementStatus === 'Active';
+        });
 
         if (!agreement) return null;
 
@@ -68,9 +71,11 @@ router.get('/occupancy-rate', (req, res) => {
 
     // Count employees where status = Active AND emplyee_allocated_agreement_id is NOT NULL
     // Formula: Occupancy Rate = (Count of employees with status = Active AND NOT NULL emplyee_allocated_agreement_id) / (Sum of residence_house_count for all ACTIVE residences) * 100
+    // BACKWARD COMPATIBILITY: Treat null/undefined status as active
     const activeEmployeesWithAgreement = employees.filter(e => {
-      // Check if employee is Active
-      const isActive = e.employee_status === 'Active' || e.employee_status === 'active';
+      // Check if employee is Active (backward compatible)
+      const status = e.status || e.employee_status;
+      const isActive = !status || status === 'Active' || status === 'active';
       // Check if emplyee_allocated_agreement_id is NOT NULL and not empty
       const hasAgreement = e.emplyee_allocated_agreement_id != null && 
                           e.emplyee_allocated_agreement_id !== '' && 
@@ -79,9 +84,11 @@ router.get('/occupancy-rate', (req, res) => {
     }).length;
 
     // Sum of residence_house_count for all residence_master where status = Active
-    const activeResidences = residences.filter(r => 
-      r.residence_status === 'Active' || r.residence_status === 'active'
-    );
+    // BACKWARD COMPATIBILITY: Treat null/undefined status as active
+    const activeResidences = residences.filter(r => {
+      const status = r.status || r.residence_status;
+      return !status || status === 'Active' || status === 'active';
+    });
     
     const totalAvailableHouses = activeResidences.reduce((sum, r) => {
       const houseCount = parseInt(r.residence_house_count) || 0;
@@ -107,37 +114,23 @@ router.get('/occupancy-rate', (req, res) => {
 // GET employee status counts
 router.get('/employee-status', (req, res) => {
   try {
-    const employees = excelReader.getEmployees();
+    const employees = excelReader.getEmployees('all'); // Get all for accurate counts
     
-    // Case-sensitive filter: Count where employee_status equals 'Active' or 'Inactive' exactly
-    // Also handle common variations
+    // BACKWARD COMPATIBILITY: Treat null/undefined status as active
     let activeCount = 0;
     let inactiveCount = 0;
-    const statusMap = {}; // Track all unique status values found
 
     employees.forEach(employee => {
-      const status = employee.employee_status;
+      const status = employee.status || employee.employee_status;
       
-      if (status) {
-        statusMap[status] = (statusMap[status] || 0) + 1;
-      }
-      
-      // Case-sensitive check: 'Active' (exact match)
-      if (status === 'Active') {
+      // CRITICAL: A record is ACTIVE if status === 'active' OR status is null/undefined
+      if (!status || status === 'active' || status === 'Active') {
         activeCount++;
-      } 
-      // Case-sensitive check: 'Inactive' (exact match)
-      else if (status === 'Inactive') {
+      } else if (status === 'inactive' || status === 'Inactive') {
         inactiveCount++;
-      }
-      // Fallback for case variations (but log as warning)
-      else if (status && typeof status === 'string') {
-        const statusLower = status.trim().toLowerCase();
-        if (statusLower === 'active') {
-          activeCount++;
-        } else if (statusLower === 'inactive') {
-          inactiveCount++;
-        }
+      } else {
+        // Unknown status - treat as active for backward compatibility
+        activeCount++;
       }
     });
 
@@ -170,8 +163,9 @@ router.get('/renewal-alerts', (req, res) => {
 
     const alerts = agreements
       .filter(agreement => {
-        // Only active agreements
-        if (agreement.agreement_status !== 'Active' && agreement.agreement_status !== 'active') {
+        // BACKWARD COMPATIBILITY: Only active agreements (treat null/undefined as active)
+        const status = agreement.status || agreement.agreement_status;
+        if (status && status !== 'Active' && status !== 'active') {
           return false;
         }
 
@@ -218,13 +212,16 @@ router.get('/renewal-alerts', (req, res) => {
 // GET financial summary
 router.get('/financial-summary', (req, res) => {
   try {
-    const agreements = excelReader.getAgreements();
+    // CRITICAL: Get ALL agreements for financial accuracy (includes inactive for historical calculations)
+    const allAgreements = excelReader.getAgreements('all');
     const { startDate, endDate } = req.query;
 
-    // Filter active agreements
-    const activeAgreements = agreements.filter(a => 
-      a.agreement_status === 'Active' || a.agreement_status === 'active'
-    );
+    // Filter active agreements with BACKWARD COMPATIBILITY
+    // For current spend, only count active ones
+    const activeAgreements = allAgreements.filter(a => {
+      const status = a.status || a.agreement_status;
+      return !status || status === 'Active' || status === 'active';
+    });
 
     // Calculate total current monthly spend
     const totalCurrentMonthlySpend = activeAgreements.reduce((sum, agreement) => {
@@ -324,7 +321,8 @@ router.get('/financial-summary', (req, res) => {
 router.get('/spend-over-time', (req, res) => {
   try {
     const { period = 'monthly' } = req.query; // yearly, half-yearly, quarterly, monthly
-    const agreements = excelReader.getAgreements();
+    // CRITICAL: Get ALL agreements for historical accuracy (includes inactive)
+    const agreements = excelReader.getAgreements('all');
     const today = new Date();
     
     let spendData = {};
@@ -337,7 +335,9 @@ router.get('/spend-over-time', (req, res) => {
       
       if (period === 'yearly') {
         // For yearly, calculate actual spend for each year based on active agreements during that year
-        const isActive = agreement.agreement_status === 'Active' || agreement.agreement_status === 'active';
+        // BACKWARD COMPATIBILITY: Treat null/undefined status as active
+        const status = agreement.status || agreement.agreement_status;
+        const isActive = !status || status === 'Active' || status === 'active';
         const currentYear = today.getFullYear();
         const year2023 = 2023;
         const year2024 = 2024;
@@ -384,8 +384,9 @@ router.get('/spend-over-time', (req, res) => {
         spendData[key] = (spendData[key] || 0) + (monthlyRent * 3);
       } else if (period === 'monthly') {
         // For monthly, calculate spend for each month from possession date to now
-        // Only for active agreements
-        const isActive = agreement.agreement_status === 'Active' || agreement.agreement_status === 'active';
+        // Only for active agreements (BACKWARD COMPATIBILITY)
+        const status = agreement.status || agreement.agreement_status;
+        const isActive = !status || status === 'Active' || status === 'active';
         
         if (isActive && monthlyRent > 0) {
           const startDate = new Date(possessionDate);
@@ -446,20 +447,19 @@ router.get('/spend-over-time', (req, res) => {
 // GET employee breakdown by Department and Status
 router.get('/employee-breakdown', (req, res) => {
   try {
-    const employees = excelReader.getEmployees();
+    const employees = excelReader.getEmployees('all'); // Get all for accurate counts
     
-    // Filter to only include active employees for department breakdown
-    // Case-sensitive: status must equal 'Active' exactly
+    // BACKWARD COMPATIBILITY: Treat null/undefined status as active
     const activeEmployees = employees.filter(e => {
-      const status = e.employee_status;
-      return status === 'Active' || (status && typeof status === 'string' && status.trim().toLowerCase() === 'active');
+      const status = e.status || e.employee_status;
+      return !status || status === 'Active' || status === 'active';
     });
     
     // Use reduce() to group by employee_department and count employee_id occurrences
     const departmentBreakdown = employees.reduce((acc, employee) => {
-      // Only count active employees
-      const status = employee.employee_status;
-      const isActive = status === 'Active' || (status && typeof status === 'string' && status.trim().toLowerCase() === 'active');
+      // BACKWARD COMPATIBILITY: Only count active employees
+      const status = employee.status || employee.employee_status;
+      const isActive = !status || status === 'Active' || status === 'active';
       
       if (isActive) {
         const department = employee.employee_department || 'Unassigned';
@@ -485,13 +485,16 @@ router.get('/employee-breakdown', (req, res) => {
       .filter(item => item.value > 0) // Filter out zero counts
       .sort((a, b) => b.value - a.value); // Sort by value descending
 
-    // Also calculate status breakdown
+    // Also calculate status breakdown with BACKWARD COMPATIBILITY
     const statusBreakdown = employees.reduce((acc, employee) => {
-      const status = employee.employee_status;
-      if (status === 'Active') {
+      const status = employee.status || employee.employee_status;
+      if (!status || status === 'Active' || status === 'active') {
         acc.Active = (acc.Active || 0) + 1;
-      } else if (status === 'Inactive') {
+      } else if (status === 'Inactive' || status === 'inactive') {
         acc.Inactive = (acc.Inactive || 0) + 1;
+      } else {
+        // Unknown status - treat as active for backward compatibility
+        acc.Active = (acc.Active || 0) + 1;
       }
       return acc;
     }, { Active: 0, Inactive: 0 });
@@ -522,13 +525,14 @@ router.get('/employee-breakdown', (req, res) => {
 // GET monthly rent cost per department
 router.get('/department-rent-cost', (req, res) => {
   try {
-    const employees = excelReader.getEmployees();
-    const agreements = excelReader.getAgreements();
+    const employees = excelReader.getEmployees('all'); // Get all for accurate calculations
+    const agreements = excelReader.getAgreements('all'); // Get all for accurate calculations
     
-    // Filter active agreements
-    const activeAgreements = agreements.filter(a => 
-      a.agreement_status === 'Active' || a.agreement_status === 'active'
-    );
+    // Filter active agreements with BACKWARD COMPATIBILITY
+    const activeAgreements = agreements.filter(a => {
+      const status = a.status || a.agreement_status;
+      return !status || status === 'Active' || status === 'active';
+    });
     
     // Create a map of agreement_id to monthly_rent_amount for quick lookup
     const agreementRentMap = {};
@@ -543,8 +547,9 @@ router.get('/department-rent-cost', (req, res) => {
     const departmentRentMap = {};
     
     employees.forEach(employee => {
-      // Only count active employees with allocated agreements
-      const isActive = employee.employee_status === 'Active' || employee.employee_status === 'active';
+      // BACKWARD COMPATIBILITY: Only count active employees with allocated agreements
+      const status = employee.status || employee.employee_status;
+      const isActive = !status || status === 'Active' || status === 'active';
       const agreementId = employee.emplyee_allocated_agreement_id;
       
       if (isActive && agreementId && agreementId.toString().trim() !== '') {
@@ -584,9 +589,11 @@ router.get('/cost-optimization-recommendations', (req, res) => {
     const recommendations = [];
 
     // Check for properties with lowest house count (potential consolidation)
-    const activeResidences = residences.filter(r => 
-      r.residence_status === 'Active' || r.residence_status === 'active'
-    );
+    // BACKWARD COMPATIBILITY: Treat null/undefined status as active
+    const activeResidences = residences.filter(r => {
+      const status = r.status || r.residence_status;
+      return !status || status === 'Active' || status === 'active';
+    });
     
     const sortedByHouseCount = [...activeResidences].sort((a, b) => 
       (parseInt(a.residence_house_count) || 0) - (parseInt(b.residence_house_count) || 0)
@@ -606,7 +613,9 @@ router.get('/cost-optimization-recommendations', (req, res) => {
     next60Days.setDate(today.getDate() + 60);
 
     const upcomingRenewals = agreements.filter(agreement => {
-      if (agreement.agreement_status !== 'Active' && agreement.agreement_status !== 'active') return false;
+      // BACKWARD COMPATIBILITY: Treat null/undefined status as active
+      const status = agreement.status || agreement.agreement_status;
+      if (status && status !== 'Active' && status !== 'active') return false;
       if (!agreement.agreement_renewal_due_date) return false;
       
       const renewalDate = new Date(agreement.agreement_renewal_due_date);
@@ -630,9 +639,11 @@ router.get('/cost-optimization-recommendations', (req, res) => {
     }
 
     // Check for properties with high advance amounts
-    const activeAgreements = agreements.filter(a => 
-      a.agreement_status === 'Active' || a.agreement_status === 'active'
-    );
+    // BACKWARD COMPATIBILITY: Treat null/undefined status as active
+    const activeAgreements = agreements.filter(a => {
+      const status = a.status || a.agreement_status;
+      return !status || status === 'Active' || status === 'active';
+    });
     
     const highAdvanceAgreements = activeAgreements.filter(agreement => {
       const advance = parseFloat(agreement.agreement_advance_amount) || 0;
@@ -648,9 +659,10 @@ router.get('/cost-optimization-recommendations', (req, res) => {
     }
 
     // Check for inactive properties that could be vacated
-    const inactiveResidences = residences.filter(r => 
-      r.residence_status === 'Inactive' || r.residence_status === 'inactive'
-    );
+    const inactiveResidences = residences.filter(r => {
+      const status = r.status || r.residence_status;
+      return status === 'Inactive' || status === 'inactive';
+    });
 
     if (inactiveResidences.length > 0) {
       recommendations.push({

@@ -25,3 +25,17 @@ code {
   background-color: #F0F2F5;
 }
 
+/* Inactive row styling for soft-deleted records */
+.inactive-row {
+  opacity: 0.6;
+  background-color: #fafafa !important;
+}
+
+.inactive-row:hover {
+  background-color: #f0f0f0 !important;
+}
+
+.inactive-row td {
+  color: #8c8c8c;
+}
+

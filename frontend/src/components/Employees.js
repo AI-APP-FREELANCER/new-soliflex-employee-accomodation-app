@@ -13,6 +13,7 @@ import {
   Typography,
   Dropdown,
   Card,
+  Modal,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined } from '@ant-design/icons';
 import { employeeAPI, agreementAPI } from '../services/api';
@@ -31,6 +32,7 @@ const Employees = () => {
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [pageSize, setPageSize] = useState(10);
   const [searchText, setSearchText] = useState('');
+  const [statusFilter, setStatusFilter] = useState('active'); // 'active', 'inactive', 'all'
   const [isMobile, setIsMobile] = useState(false);
   const [form] = Form.useForm();
   const tableRef = useRef(null);
@@ -48,12 +50,12 @@ const Employees = () => {
   useEffect(() => {
     fetchEmployees();
     fetchAgreements();
-  }, []);
+  }, [statusFilter]);
 
   const fetchEmployees = async () => {
     setLoading(true);
     try {
-      const response = await employeeAPI.getAll();
+      const response = await employeeAPI.getAll(statusFilter);
       setEmployees(response.data);
     } catch (error) {
       message.error('Failed to fetch employees');
@@ -252,17 +254,29 @@ const Employees = () => {
     {
       title: 'Actions',
       key: 'actions',
-      render: (_, record) => (
-        <Space>
-          <Button
-            type="link"
-            icon={<EditOutlined />}
-            onClick={() => handleEdit(record)}
-          >
-            Edit
-          </Button>
-        </Space>
-      ),
+      render: (_, record) => {
+        const isInactive = record.status === 'inactive' || record.employee_status === 'Inactive';
+        return (
+          <Space>
+            <Button
+              type="link"
+              icon={<EditOutlined />}
+              onClick={() => handleEdit(record)}
+            >
+              Edit
+            </Button>
+            {!isInactive && (
+              <Button
+                type="link"
+                danger
+                onClick={() => handleDeactivate(record)}
+              >
+                Mark Inactive
+              </Button>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
@@ -348,6 +362,17 @@ const Employees = () => {
                     >
                       Edit
                     </Button>,
+                    ...((employee.status !== 'inactive' && employee.employee_status !== 'Inactive') ? [
+                      <Button
+                        key="deactivate"
+                        type="link"
+                        danger
+                        onClick={() => handleDeactivate(employee)}
+                        block
+                      >
+                        Mark Inactive
+                      </Button>
+                    ] : [])
                   ]}
                 >
                   <Space direction="vertical" style={{ width: '100%' }} size="small">
@@ -394,21 +419,25 @@ const Employees = () => {
         ) : (
           // Desktop Table View
           <div style={{ overflowX: 'auto' }}>
-            <Table
-              columns={columns}
-              dataSource={filteredEmployees}
-              loading={loading}
-              rowKey="employee_id"
-              scroll={{ x: 'max-content' }}
-              pagination={{
-                pageSize: pageSize,
-                showSizeChanger: true,
-                pageSizeOptions: ['10', '25', '50', '100'],
-                onShowSizeChange: (current, size) => {
-                  setPageSize(size);
-                },
-              }}
-            />
+              <Table
+                columns={columns}
+                dataSource={filteredEmployees}
+                loading={loading}
+                rowKey="employee_id"
+                scroll={{ x: 'max-content' }}
+                rowClassName={(record) => {
+                  const isInactive = record.status === 'inactive' || record.employee_status === 'Inactive';
+                  return isInactive ? 'inactive-row' : '';
+                }}
+                pagination={{
+                  pageSize: pageSize,
+                  showSizeChanger: true,
+                  pageSizeOptions: ['10', '25', '50', '100'],
+                  onShowSizeChange: (current, size) => {
+                    setPageSize(size);
+                  },
+                }}
+              />
           </div>
         )}
       </div>

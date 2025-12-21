@@ -6,10 +6,11 @@ const excelReader = require('../data/excelReader');
 // All routes require authentication
 router.use(authenticateToken);
 
-// GET all agreements
+// GET all agreements with optional status filter
 router.get('/', (req, res) => {
   try {
-    const agreements = excelReader.getAgreements();
+    const statusFilter = req.query.status || 'active'; // Default to 'active'
+    const agreements = excelReader.getAgreements(statusFilter);
     res.json(agreements);
   } catch (error) {
     console.error('Error fetching agreements:', error);
@@ -17,14 +18,11 @@ router.get('/', (req, res) => {
   }
 });
 
-// GET active agreements only
+// GET active agreements only (legacy endpoint for backward compatibility)
 router.get('/active', (req, res) => {
   try {
-    const agreements = excelReader.getAgreements();
-    const activeAgreements = agreements.filter(a => 
-      a.agreement_status === 'Active' || a.agreement_status === 'active'
-    );
-    res.json(activeAgreements);
+    const agreements = excelReader.getAgreements('active');
+    res.json(agreements);
   } catch (error) {
     console.error('Error fetching active agreements:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -48,10 +46,10 @@ router.get('/:id', (req, res) => {
   }
 });
 
-// GET agreements by residence_id
+// GET agreements by residence_id (includes all statuses for historical reference)
 router.get('/residence/:residenceId', (req, res) => {
   try {
-    const agreements = excelReader.getAgreements();
+    const agreements = excelReader.getAgreements('all'); // Get all for historical reference
     const residenceAgreements = agreements.filter(a => 
       a.agreement_residence_id === req.params.residenceId
     );
@@ -110,6 +108,25 @@ router.put('/:id', (req, res) => {
     res.json(updatedAgreement);
   } catch (error) {
     console.error('Error updating agreement:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PATCH deactivate agreement (soft delete)
+router.patch('/:id/deactivate', (req, res) => {
+  try {
+    const agreementId = req.params.id;
+    const reason = req.body.reason || 'Marked inactive by user';
+    
+    const deactivatedAgreement = excelReader.deactivateAgreement(agreementId, reason);
+    
+    if (!deactivatedAgreement) {
+      return res.status(404).json({ error: 'Agreement not found' });
+    }
+    
+    res.json(deactivatedAgreement);
+  } catch (error) {
+    console.error('Error deactivating agreement:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -52,28 +52,31 @@ export const authAPI = {
 
 // Residence APIs
 export const residenceAPI = {
-  getAll: () => api.get('/residence'),
+  getAll: (status = 'active') => api.get(`/residence?status=${status}`),
   getById: (id) => api.get(`/residence/${id}`),
   create: (data) => api.post('/residence', data),
   update: (id, data) => api.put(`/residence/${id}`, data),
+  deactivate: (id, data) => api.patch(`/residence/${id}/deactivate`, data),
 };
 
 // Agreement APIs
 export const agreementAPI = {
-  getAll: () => api.get('/agreement'),
+  getAll: (status = 'active') => api.get(`/agreement?status=${status}`),
   getActive: () => api.get('/agreement/active'),
   getById: (id) => api.get(`/agreement/${id}`),
   getByResidence: (residenceId) => api.get(`/agreement/residence/${residenceId}`),
   create: (data) => api.post('/agreement', data),
   update: (id, data) => api.put(`/agreement/${id}`, data),
+  deactivate: (id, data) => api.patch(`/agreement/${id}/deactivate`, data),
 };
 
 // Employee APIs
 export const employeeAPI = {
-  getAll: () => api.get('/employee'),
+  getAll: (status = 'active') => api.get(`/employee?status=${status}`),
   getById: (id) => api.get(`/employee/${id}`),
   create: (data) => api.post('/employee', data),
   update: (id, data) => api.put(`/employee/${id}`, data),
+  deactivate: (id, data) => api.patch(`/employee/${id}/deactivate`, data),
 };
 
 // Analytics/Reporting APIs

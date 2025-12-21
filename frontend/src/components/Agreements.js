@@ -230,11 +230,25 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
       const newAgreementResponse = await agreementAPI.create(newAgreementData);
       const newAgreementId = newAgreementResponse.data?.agreement_id || newAgreementResponse.data?.id;
 
-      // Mark old agreement as Renewed
+      // Mark old agreement as inactive (soft delete) with lifecycle management
+      const now = new Date().toISOString();
       await agreementAPI.update(selectedAgreement.agreement_id, {
+        status: 'inactive',
         agreement_status: 'Renewed',
+        inactiveDate: now,
         agreement_renewal_due_date: null, // Clear obsolete due date on the old agreement
+        reason: 'Agreement renewed - replaced by new agreement'
       });
+      
+      // Also update status history via deactivate endpoint for proper tracking
+      try {
+        await agreementAPI.deactivate(selectedAgreement.agreement_id, {
+          reason: 'Agreement renewed - replaced by new agreement'
+        });
+      } catch (deactivateError) {
+        // If deactivate endpoint doesn't exist yet, the update above is sufficient
+        console.warn('Deactivate endpoint not available, using update method');
+      }
 
       // Update employee allocations to new agreement_id (if needed)
       // Note: This would require employeeAPI to update allocations
@@ -449,46 +463,50 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
 
     // Apply review filter (IST-based comparisons)
     if (reviewFilter) {
+      // Ensure we are using the correct reference time (IST Start of Day)
       const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
       const ninetyDaysFromNow = today.add(90, 'day');
       
+      console.log(`[Agreements] Filtering by: ${reviewFilter}`);
+      console.log(`[Agreements] Ref Date (Today IST): ${today.format('YYYY-MM-DD')}`);
+      
       result = result.filter(agreement => {
         const renewalDueDate = agreement.agreement_renewal_due_date;
+        
+        // skip if date is missing
         if (!renewalDueDate && renewalDueDate !== 0) return false;
         
-        // Use robust date parser from dateUtils to handle Excel serial dates
+        // Use robust date parser
         const dueDate = parseDateFromAPI(renewalDueDate);
+        
         if (!dueDate || !dueDate.isValid()) {
+          // console.warn('Invalid date for agreement:', agreement.agreement_id);
           return false;
         }
         
-        // Past Due: renewal due date has passed (before today)
+        // Logic must match DashboardHome.js exactly
         const isPastDue = dueDate.isBefore(today, 'day');
-        // Nearing Due: within next 90 days (today or later, but within 90 days)
         const isNearingDue = (dueDate.isSame(today, 'day') || dueDate.isAfter(today, 'day')) 
           && dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day');
         
-        if (reviewFilter === 'pastDue') {
-          return isPastDue;
-        }
-        if (reviewFilter === 'due90') {
-          return isNearingDue && !isPastDue;
-        }
-        // 'review' combines both
-        return isPastDue || isNearingDue;
+        if (reviewFilter === 'pastDue') return isPastDue;
+        if (reviewFilter === 'due90') return isNearingDue && !isPastDue;
+        if (reviewFilter === 'review') return isPastDue || isNearingDue;
+        
+        return true;
       });
+      
+      console.log(`[Agreements] Filtered Result Count: ${result.length}`);
     }
 
     // Apply search text filter
     if (searchText.trim()) {
       const lowerSearch = searchText.toLowerCase().trim();
-
       result = result.filter(agreement => {
         const agreementId = (agreement.agreement_id || '').toLowerCase();
         const residenceId = (agreement.agreement_residence_id || '').toLowerCase();
         const monthlyRent = String(agreement.agreement_monthly_rent_amount || '').toLowerCase();
         const advanceAmount = String(agreement.agreement_advance_amount || '').toLowerCase();
-
         return (
           agreementId.includes(lowerSearch) ||
           residenceId.includes(lowerSearch) ||

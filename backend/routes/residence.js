@@ -6,10 +6,11 @@ const excelReader = require('../data/excelReader');
 // All routes require authentication
 router.use(authenticateToken);
 
-// GET all residences
+// GET all residences with optional status filter
 router.get('/', (req, res) => {
   try {
-    const residences = excelReader.getResidences();
+    const statusFilter = req.query.status || 'active'; // Default to 'active'
+    const residences = excelReader.getResidences(statusFilter);
     res.json(residences);
   } catch (error) {
     console.error('Error fetching residences:', error);
@@ -82,6 +83,25 @@ router.put('/:id', (req, res) => {
     res.json(updatedResidence);
   } catch (error) {
     console.error('Error updating residence:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PATCH deactivate residence (soft delete)
+router.patch('/:id/deactivate', (req, res) => {
+  try {
+    const residenceId = req.params.id;
+    const reason = req.body.reason || 'Marked inactive by user';
+    
+    const deactivatedResidence = excelReader.deactivateResidence(residenceId, reason);
+    
+    if (!deactivatedResidence) {
+      return res.status(404).json({ error: 'Residence not found' });
+    }
+    
+    res.json(deactivatedResidence);
+  } catch (error) {
+    console.error('Error deactivating residence:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

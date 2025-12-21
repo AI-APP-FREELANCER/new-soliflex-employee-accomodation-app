@@ -14,6 +14,7 @@ import {
   Button,
   Dropdown,
   message,
+  Table,
 } from 'antd';
 import {
   HomeOutlined,
@@ -111,6 +112,8 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
   };
   const [departmentRentCost, setDepartmentRentCost] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
+  const [expandedRecommendation, setExpandedRecommendation] = useState(null);
+  const [closedRoomsData, setClosedRoomsData] = useState([]);
   const [departmentRentAggregated, setDepartmentRentAggregated] = useState([]);
   const [designationRentAggregated, setDesignationRentAggregated] = useState([]);
   const [processedCosts, setProcessedCosts] = useState({
@@ -190,9 +193,9 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         departmentRentCostRes,
         recommendationsRes,
       ] = await Promise.all([
-        residenceAPI.getAll(),
-        agreementAPI.getAll(),
-        employeeAPI.getAll(),
+        residenceAPI.getAll('all'), // Get all residences for joining with closed agreements
+        agreementAPI.getAll('all'), // Get all agreements including inactive for financial accuracy
+        employeeAPI.getAll('all'), // Get all employees for accurate counts
         analyticsAPI.getRenewalAlerts(90),
         analyticsAPI.getEmployeeBreakdown(),
         analyticsAPI.getEmployeeStatus(),
@@ -306,23 +309,21 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
 
       // CRITICAL: Calculate financial totals BEFORE applying timeline filter
       // Financial totals should reflect ALL active agreements, not just those in the timeline
-      // CRITICAL FIX: More robust status matching to handle various formats
+      // BACKWARD COMPATIBILITY: A record is ACTIVE if status === 'active' OR status is null/undefined
       let allActiveAgreements = agreements.filter(a => {
-        // Handle null, undefined, empty string, and various formats
-        const statusRaw = a.agreement_status;
-        if (!statusRaw && statusRaw !== 0) {
-          // If status is missing but agreement has rent, include it (fallback)
-          const rent = a.agreement_monthly_rent_amount;
-          const hasRent = (typeof rent === 'number' && !isNaN(rent) && rent > 0) || 
-                         (typeof rent === 'string' && parseFloat(rent) > 0);
-          return hasRent;
+        // Check both new status field and legacy agreement_status
+        const status = a.status || a.agreement_status;
+        
+        // CRITICAL: Treat null/undefined/missing status as ACTIVE (backward compatibility)
+        if (!status || status === null || status === undefined) {
+          return true; // Legacy records without status are considered active
         }
         
         // Convert to string, trim, and compare case-insensitively
-        const status = String(statusRaw).trim().toLowerCase();
+        const statusLower = String(status).trim().toLowerCase();
         
         // Match 'active' in any case variation
-        return status === 'active';
+        return statusLower === 'active';
       });
 
       // Debug: Log agreement status distribution with detailed analysis
@@ -425,9 +426,10 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
       let activeEmployeeCount = 0;
       
       employees.forEach(employee => {
-        // Status Check Standardization: Handle varied casing and nulls gracefully
-        const employeeStatus = employee.employee_status || employee.employeeStatus || '';
-        const isActive = employeeStatus && String(employeeStatus).toUpperCase() === 'ACTIVE';
+        // BACKWARD COMPATIBILITY: Status Check - treat null/undefined as active
+        const employeeStatus = employee.status || employee.employee_status || employee.employeeStatus || '';
+        // CRITICAL: A record is ACTIVE if status === 'active' OR status is null/undefined
+        const isActive = !employeeStatus || String(employeeStatus).toUpperCase() === 'ACTIVE' || String(employeeStatus).toLowerCase() === 'active';
         
         if (isActive) {
           activeEmployeeCount++;
@@ -607,16 +609,20 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
       setDepartmentRentAggregated(departmentRentArray);
       setDesignationRentAggregated(designationRentArray);
 
-      // Calculate statistics
-      const activeResidences = residences.filter(r => 
-        r.residence_status === 'Active' || r.residence_status === 'active'
-      );
+      // Calculate statistics with BACKWARD COMPATIBILITY
+      // CRITICAL: A record is ACTIVE if status === 'active' OR status is null/undefined
+      const activeResidences = residences.filter(r => {
+        const status = r.status || r.residence_status;
+        return !status || status === 'Active' || status === 'active';
+      });
       
       // Note: activeAgreements is used for pro-rata calculations (after timeline filter)
       // Financial totals use allActiveAgreements (calculated before timeline filter)
+      // BACKWARD COMPATIBILITY: Treat null/undefined status as active
       const activeAgreements = agreements.filter(a => {
-        const status = (a.agreement_status || '').toString();
-        return status.toLowerCase() === 'active';
+        const status = a.status || a.agreement_status;
+        if (!status || status === null || status === undefined) return true; // Legacy records are active
+        return String(status).toLowerCase() === 'active';
       });
 
       const totalProperties = activeResidences.length;
@@ -918,11 +924,27 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
       });
 
       // Calculate advance return metrics with robust type coercion
-      // CRITICAL FIX: Use case-insensitive status matching
+      // CRITICAL FIX: Include inactive agreements (soft-deleted) for financial accuracy
       const closedAgreements = agreements.filter(a => {
         const status = (a.agreement_status || '').toString().trim().toLowerCase();
-        return status === 'closed' || status === 'vacated';
+        const newStatus = (a.status || '').toString().trim().toLowerCase();
+        // Include both legacy status and new lifecycle status
+        return status === 'closed' || status === 'vacated' || newStatus === 'inactive';
       });
+      
+      // Join with residences to get owner names for Closed Rooms table
+      const closedRoomsWithResidence = closedAgreements.map(agreement => {
+        const residence = residences.find(r => r.residence_id === agreement.agreement_residence_id);
+        return {
+          ...agreement,
+          residenceName: residence ? 
+            `${residence.residence_door_number || ''} ${residence.residence_address_line_1 || ''}`.trim() || 'N/A' : 'N/A',
+          ownerName: residence?.residence_owner_name || 'N/A',
+          ownerId: residence?.residence_owner_id || 'N/A',
+        };
+      });
+      
+      setClosedRoomsData(closedRoomsWithResidence);
       
       const totalDueBack = closedAgreements.reduce((sum, a) => {
         // Values are already parsed as numbers at fetch time
@@ -2161,7 +2183,36 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
             {recommendations.map((rec, index) => (
               <Alert
                 key={index}
-                message={rec.message}
+                message={
+                  <div>
+                    <div style={{ cursor: rec.detailedMessage ? 'pointer' : 'default' }}
+                      onClick={() => {
+                        if (rec.detailedMessage) {
+                          setExpandedRecommendation(expandedRecommendation === index ? null : index);
+                        }
+                      }}
+                    >
+                      {rec.message}
+                      {rec.detailedMessage && (
+                        <span style={{ marginLeft: '8px', color: '#1890ff', fontSize: '12px' }}>
+                          {expandedRecommendation === index ? '▼ Hide Details' : '▶ Show Details'}
+                        </span>
+                      )}
+                    </div>
+                    {expandedRecommendation === index && rec.detailedMessage && (
+                      <div style={{ 
+                        marginTop: '12px', 
+                        padding: '12px', 
+                        background: '#f0f0f0', 
+                        borderRadius: '4px',
+                        fontSize: '13px',
+                        whiteSpace: 'pre-wrap'
+                      }}>
+                        {rec.detailedMessage}
+                      </div>
+                    )}
+                  </div>
+                }
                 type={
                   rec.priority === 'high'
                     ? 'error'
@@ -2173,6 +2224,68 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
                 style={{ marginBottom: responsive.isMobile ? '8px' : '12px' }}
               />
             ))}
+          </Card>
+        )}
+
+        {/* Closed Rooms Table */}
+        {closedRoomsData.length > 0 && (
+          <Card
+            title="Closed Rooms & Rent Settlement"
+            style={{ marginBottom: responsive.isMobile ? '16px' : '24px' }}
+          >
+            <Table
+              dataSource={closedRoomsData}
+              rowKey="agreement_id"
+              pagination={{ pageSize: 10 }}
+              scroll={{ x: 'max-content' }}
+              columns={[
+                {
+                  title: 'Agreement ID',
+                  dataIndex: 'agreement_id',
+                  key: 'agreement_id',
+                },
+                {
+                  title: 'Room/Unit',
+                  dataIndex: 'agreement_employee_unit',
+                  key: 'agreement_employee_unit',
+                  render: (unit) => unit || 'N/A',
+                },
+                {
+                  title: 'Residence Name',
+                  dataIndex: 'residenceName',
+                  key: 'residenceName',
+                },
+                {
+                  title: 'Owner Name',
+                  dataIndex: 'ownerName',
+                  key: 'ownerName',
+                },
+                {
+                  title: 'Owner ID',
+                  dataIndex: 'ownerId',
+                  key: 'ownerId',
+                },
+                {
+                  title: 'Total Advance Due Back',
+                  dataIndex: 'agreement_advance_amount',
+                  key: 'advance_due',
+                  render: (amount) => {
+                    const numAmount = typeof amount === 'number' ? amount : parseFloat(amount) || 0;
+                    return `₹${numAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                  },
+                },
+                {
+                  title: 'Total Net Received',
+                  key: 'net_received',
+                  render: (_, record) => {
+                    const transactions = JSON.parse(localStorage.getItem('advanceTransactions') || '[]');
+                    const transaction = transactions.find(t => t.agreementId === record.agreement_id);
+                    const netReceived = transaction?.netReceived || 0;
+                    return `₹${netReceived.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                  },
+                },
+              ]}
+            />
           </Card>
         )}
 
