@@ -471,9 +471,19 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
     return { pastDue, due90 };
   }, [agreements]);
 
-  // Filter agreements based on search text only (server-side filtering handles status/renewal/residence)
+  // Filter agreements based on search text and status (client-side backup filtering)
   const filteredAgreements = useMemo(() => {
     let result = agreements;
+
+    // Apply status filter with case-insensitive comparison (backup to server-side filtering)
+    if (statusFilter && statusFilter !== 'all') {
+      const normalize = (str) => String(str || '').trim().toLowerCase();
+      result = result.filter(agreement => {
+        const agreementStatus = normalize(agreement.agreement_status || agreement.status);
+        const filterStatus = normalize(statusFilter);
+        return agreementStatus === filterStatus;
+      });
+    }
 
     // Apply search text filter (client-side for quick search)
     if (searchText.trim()) {
@@ -493,7 +503,7 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
     }
 
     return result;
-  }, [searchText, agreements]);
+  }, [searchText, agreements, statusFilter]);
 
   // Export handlers
   const handleExportPDF = async () => {

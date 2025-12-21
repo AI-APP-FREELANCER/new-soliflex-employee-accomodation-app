@@ -111,8 +111,6 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
     return validation;
   };
   const [departmentRentCost, setDepartmentRentCost] = useState([]);
-  const [recommendations, setRecommendations] = useState([]);
-  const [expandedRecommendation, setExpandedRecommendation] = useState(null);
   const [closedRoomsData, setClosedRoomsData] = useState([]);
   const [departmentRentAggregated, setDepartmentRentAggregated] = useState([]);
   const [designationRentAggregated, setDesignationRentAggregated] = useState([]);
@@ -191,7 +189,6 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         financialSummaryRes,
         monthlySpendRes,
         departmentRentCostRes,
-        recommendationsRes,
       ] = await Promise.all([
         residenceAPI.getAll('all'), // Get all residences for joining with closed agreements
         agreementAPI.getAll('all'), // Get all agreements including inactive for financial accuracy
@@ -202,13 +199,18 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
         analyticsAPI.getFinancialSummary(),
         analyticsAPI.getSpendOverTime('monthly'),
         analyticsAPI.getDepartmentRentCost(),
-        analyticsAPI.getCostOptimizationRecommendations(),
       ]);
 
-      // Validate API responses
-      const residences = Array.isArray(residencesRes?.data) ? residencesRes.data : [];
-      let agreements = Array.isArray(agreementsRes?.data) ? agreementsRes.data : [];
-      const employees = Array.isArray(employeesRes?.data) ? employeesRes.data : [];
+      // Validate API responses with robust parsing for nested data structures
+      const residences = Array.isArray(residencesRes?.data) 
+        ? residencesRes.data 
+        : (Array.isArray(residencesRes?.data?.data) ? residencesRes.data.data : []);
+      let agreements = Array.isArray(agreementsRes?.data) 
+        ? agreementsRes.data 
+        : (Array.isArray(agreementsRes?.data?.data) ? agreementsRes.data.data : []);
+      const employees = Array.isArray(employeesRes?.data) 
+        ? employeesRes.data 
+        : (Array.isArray(employeesRes?.data?.data) ? employeesRes.data.data : []);
       
       console.log('📊 API Response Validation:', {
         residencesCount: residences.length,
@@ -1095,8 +1097,6 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
       console.log('Department Rent Cost Data:', deptRentData);
       setDepartmentRentCost(deptRentData);
 
-      // Set recommendations
-      setRecommendations(recommendationsRes.data.recommendations || []);
     } catch (error) {
       console.error('❌ Failed to fetch dashboard data:', error);
       console.error('Error details:', {
@@ -2174,58 +2174,6 @@ const DashboardHome = ({ onNavigateToAgreements }) => {
             </Col>
           </Row>
 
-        {/* Cost Optimization Recommendations */}
-        {recommendations.length > 0 && (
-          <Card
-            title="Cost Optimization Recommendations"
-            style={{ marginBottom: responsive.isMobile ? '16px' : '24px' }}
-          >
-            {recommendations.map((rec, index) => (
-              <Alert
-                key={index}
-                message={
-                  <div>
-                    <div style={{ cursor: rec.detailedMessage ? 'pointer' : 'default' }}
-                      onClick={() => {
-                        if (rec.detailedMessage) {
-                          setExpandedRecommendation(expandedRecommendation === index ? null : index);
-                        }
-                      }}
-                    >
-                      {rec.message}
-                      {rec.detailedMessage && (
-                        <span style={{ marginLeft: '8px', color: '#1890ff', fontSize: '12px' }}>
-                          {expandedRecommendation === index ? '▼ Hide Details' : '▶ Show Details'}
-                        </span>
-                      )}
-                    </div>
-                    {expandedRecommendation === index && rec.detailedMessage && (
-                      <div style={{ 
-                        marginTop: '12px', 
-                        padding: '12px', 
-                        background: '#f0f0f0', 
-                        borderRadius: '4px',
-                        fontSize: '13px',
-                        whiteSpace: 'pre-wrap'
-                      }}>
-                        {rec.detailedMessage}
-                      </div>
-                    )}
-                  </div>
-                }
-                type={
-                  rec.priority === 'high'
-                    ? 'error'
-                    : rec.priority === 'medium'
-                    ? 'warning'
-                    : 'info'
-                }
-                showIcon
-                style={{ marginBottom: responsive.isMobile ? '8px' : '12px' }}
-              />
-            ))}
-          </Card>
-        )}
 
         {/* Closed Rooms Table */}
         {closedRoomsData.length > 0 && (

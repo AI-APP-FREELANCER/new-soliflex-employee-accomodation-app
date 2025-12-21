@@ -111,43 +111,48 @@ const Employees = () => {
     }
   };
 
-  // Filter employees based on search text
+  // Filter employees based on search text and status
   // CRITICAL: Always filter from the MASTER employee list to prevent result persistence
   const filteredEmployees = useMemo(() => {
     // Get the master list - this is the source of truth, never filtered data
-    const MASTER_EMPLOYEE_LIST = employees;
+    let result = employees;
     
-    // If search is empty, return the complete master list
-    if (!searchText || !searchText.trim()) {
-      return MASTER_EMPLOYEE_LIST;
+    // Apply status filter with case-insensitive comparison
+    if (statusFilter && statusFilter !== 'all') {
+      const normalize = (str) => String(str || '').trim().toLowerCase();
+      result = result.filter(employee => {
+        const employeeStatus = normalize(employee.employee_status || employee.status);
+        const filterStatus = normalize(statusFilter);
+        return employeeStatus === filterStatus;
+      });
     }
 
-    // Always start filtering from the absolute MASTER list (never from previously filtered results)
-    const lowerSearch = searchText.toLowerCase().trim();
-    
-    const results = MASTER_EMPLOYEE_LIST.filter(employee => {
-      const employeeId = (employee.employee_id || '').toLowerCase();
-      const firstName = (employee.employee_first_name || '').toLowerCase();
-      const lastName = (employee.employee_last_name || '').toLowerCase();
-      const sirName = (employee.employee_sir_name || '').toLowerCase();
-      const fullName = `${firstName} ${lastName} ${sirName}`.trim().toLowerCase();
-      const department = (employee.employee_department || '').toLowerCase();
-      const designation = (employee.employee_designation || '').toLowerCase();
+    // Apply search text filter
+    if (searchText && searchText.trim()) {
+      const lowerSearch = searchText.toLowerCase().trim();
+      result = result.filter(employee => {
+        const employeeId = (employee.employee_id || '').toLowerCase();
+        const firstName = (employee.employee_first_name || '').toLowerCase();
+        const lastName = (employee.employee_last_name || '').toLowerCase();
+        const sirName = (employee.employee_sir_name || '').toLowerCase();
+        const fullName = `${firstName} ${lastName} ${sirName}`.trim().toLowerCase();
+        const department = (employee.employee_department || '').toLowerCase();
+        const designation = (employee.employee_designation || '').toLowerCase();
 
-      return (
-        employeeId.includes(lowerSearch) ||
-        firstName.includes(lowerSearch) ||
-        lastName.includes(lowerSearch) ||
-        sirName.includes(lowerSearch) ||
-        fullName.includes(lowerSearch) ||
-        department.includes(lowerSearch) ||
-        designation.includes(lowerSearch)
-      );
-    });
+        return (
+          employeeId.includes(lowerSearch) ||
+          firstName.includes(lowerSearch) ||
+          lastName.includes(lowerSearch) ||
+          sirName.includes(lowerSearch) ||
+          fullName.includes(lowerSearch) ||
+          department.includes(lowerSearch) ||
+          designation.includes(lowerSearch)
+        );
+      });
+    }
 
-    // Completely replace the displayed list with the new results (no additive effect)
-    return results;
-  }, [searchText, employees]);
+    return result;
+  }, [searchText, employees, statusFilter]);
 
   // Export handlers
   const handleExportPDF = async () => {
@@ -327,7 +332,7 @@ const Employees = () => {
         </Space>
       </div>
 
-      <div style={{ marginBottom: '16px' }}>
+      <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
         <Input
           placeholder="Search by Employee ID, Name, Department, or Designation..."
           prefix={<SearchOutlined />}
@@ -336,6 +341,15 @@ const Employees = () => {
           allowClear
           style={{ width: isMobile ? '100%' : '400px' }}
         />
+        <Select
+          value={statusFilter}
+          onChange={setStatusFilter}
+          style={{ width: isMobile ? '100%' : '150px' }}
+        >
+          <Option value="active">Show Active</Option>
+          <Option value="inactive">Show Inactive</Option>
+          <Option value="all">Show All</Option>
+        </Select>
       </div>
 
       <div ref={tableRef}>

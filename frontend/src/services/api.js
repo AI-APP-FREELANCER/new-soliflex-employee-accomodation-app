@@ -101,7 +101,6 @@ export const analyticsAPI = {
   getSpendOverTime: (period = 'monthly') => api.get(`/analytics/spend-over-time?period=${period}`),
   getEmployeeBreakdown: () => api.get('/analytics/employee-breakdown'),
   getDepartmentRentCost: () => api.get('/analytics/department-rent-cost'),
-  getCostOptimizationRecommendations: () => api.get('/analytics/cost-optimization-recommendations'),
 };
 
 export default api;
