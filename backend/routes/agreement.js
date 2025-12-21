@@ -88,26 +88,32 @@ function enrichAgreement(agreement) {
 // GET all agreements with optional status filter and server-side filtering
 router.get('/', (req, res) => {
   try {
-    const statusFilter = req.query.status || 'active'; // Default to 'active'
-    let agreements = excelReader.getAgreements(statusFilter);
+    // STEP 1: Always fetch ALL data from Excel to bypass potential reader bugs
+    let agreements = excelReader.getAgreements('all');
     
-    // Apply server-side filtering
-    const { residence_id, renewal_status } = req.query;
+    // STEP 2: Apply Status Filter Manually (Strict Case-Insensitive)
+    if (req.query.status && req.query.status.toLowerCase() !== 'all') {
+      const targetStatus = req.query.status.trim().toLowerCase();
+      agreements = agreements.filter(a => {
+        const status = a.agreement_status || a.status; // Check both fields
+        return String(status || '').trim().toLowerCase() === targetStatus;
+      });
+    }
     
-    // Filter by residence_id if provided
-    if (residence_id) {
-      agreements = agreements.filter(a => 
-        a.agreement_residence_id === residence_id
+    // STEP 3: Apply Residence Filter
+    if (req.query.residence_id) {
+      agreements = agreements.filter(a =>
+        a.agreement_residence_id === req.query.residence_id
       );
     }
     
-    // Enrich agreements with virtual fields
+    // STEP 4: Enrich with Virtual Fields (Calculated Dates)
     agreements = agreements.map(enrichAgreement);
     
-    // Filter by renewal_status if provided (must be done after enrichment)
-    if (renewal_status) {
-      agreements = agreements.filter(a => 
-        a.computed_renewal_status === renewal_status
+    // STEP 5: Apply Renewal Status Filter (After Enrichment)
+    if (req.query.renewal_status) {
+      agreements = agreements.filter(a =>
+        a.computed_renewal_status === req.query.renewal_status
       );
     }
     
