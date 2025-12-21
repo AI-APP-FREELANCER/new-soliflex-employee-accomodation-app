@@ -3,12 +3,9 @@ import { Card, Row, Col, Statistic, Spin, Typography, List, Tag, Button, Empty }
 import { 
   HomeOutlined, 
   UserOutlined, 
-  FileProtectOutlined, 
-  AlertOutlined,
-  DollarOutlined,
-  TeamOutlined,
+  TeamOutlined, 
   BarChartOutlined,
-  ArrowRightOutlined
+  AlertOutlined
 } from '@ant-design/icons';
 import { Pie, Column } from '@ant-design/plots';
 import { useNavigate } from 'react-router-dom';
@@ -307,7 +304,13 @@ const DashboardHome = () => {
                      colorField="type" 
                      radius={0.8} 
                      innerRadius={0.6}
-                     label={{ type: 'inner', offset: '-30%', content: '{value}' }}
+                     // FIX: Use a function for content to avoid 'Undefined variable: value' expression error
+                     label={{ 
+                       type: 'inner', 
+                       offset: '-30%', 
+                       content: ({ value }) => String(value),
+                       style: { fontSize: 14, textAlign: 'center' }
+                     }}
                      legend={{ position: 'bottom' }}
                      height={250}
                    />
@@ -326,7 +329,11 @@ const DashboardHome = () => {
                     xField="department" 
                     yField="cost" 
                     color="#1890ff"
-                    label={{ position: 'middle', style: { fill: '#FFFFFF', opacity: 0.6 } }}
+                    label={{ 
+                      position: 'middle', 
+                      style: { fill: '#FFFFFF', opacity: 0.6 },
+                      content: (item) => item.cost ? String(item.cost) : ''
+                    }}
                   />
                 ) : <Empty description="No cost data available (Check Employee-Residence Links)" />}
               </Card>
