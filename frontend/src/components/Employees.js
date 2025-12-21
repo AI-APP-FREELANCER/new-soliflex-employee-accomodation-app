@@ -439,10 +439,6 @@ const Employees = () => {
                 loading={loading}
                 rowKey="employee_id"
                 scroll={{ x: 'max-content' }}
-                rowClassName={(record) => {
-                  const isInactive = record.status === 'inactive' || record.employee_status === 'Inactive';
-                  return isInactive ? 'inactive-row' : '';
-                }}
                 pagination={{
                   pageSize: pageSize,
                   showSizeChanger: true,

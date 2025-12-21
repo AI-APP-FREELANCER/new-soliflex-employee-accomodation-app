@@ -114,33 +114,25 @@ router.get('/occupancy-rate', (req, res) => {
 // GET employee status counts
 router.get('/employee-status', (req, res) => {
   try {
-    const employees = excelReader.getEmployees('all'); // Get all for accurate counts
-    
-    // BACKWARD COMPATIBILITY: Treat null/undefined status as active
+    const employees = excelReader.getEmployees('all');
     let activeCount = 0;
     let inactiveCount = 0;
-
-    employees.forEach(employee => {
-      const status = employee.status || employee.employee_status;
-      
-      // CRITICAL: A record is ACTIVE if status === 'active' OR status is null/undefined
-      if (!status || status === 'active' || status === 'Active') {
+    
+    employees.forEach(e => {
+      // Check multiple potential field names for status
+      const rawStatus = e.status || e.employee_status || e.Status || '';
+      const status = String(rawStatus).trim().toLowerCase();
+      // Logic: Active if 'active' or if status is missing/empty (backward compatibility)
+      if (status === 'active' || status === '' || status === 'null' || status === 'undefined') {
         activeCount++;
-      } else if (status === 'inactive' || status === 'Inactive') {
-        inactiveCount++;
       } else {
-        // Unknown status - treat as active for backward compatibility
-        activeCount++;
+        inactiveCount++;
       }
     });
-
-    res.json({
-      activeCount,
-      inactiveCount,
-      total: employees.length,
-    });
+    
+    res.json({ activeCount, inactiveCount, total: employees.length });
   } catch (error) {
-    console.error('Error fetching employee status:', error);
+    console.error('Error fetching status:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

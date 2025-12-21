@@ -85,36 +85,33 @@ function enrichAgreement(agreement) {
   };
 }
 
-// GET all agreements with optional status filter and server-side filtering
+// GET all agreements with robust server-side filtering
 router.get('/', (req, res) => {
   try {
-    // STEP 1: Always fetch ALL data from Excel to bypass potential reader bugs
+    // 1. ALWAYS fetch ALL data. Do not trust the reader to filter.
     let agreements = excelReader.getAgreements('all');
     
-    // STEP 2: Apply Status Filter Manually (Strict Case-Insensitive)
+    // 2. Enrich with virtual fields (Dates & Status) BEFORE filtering
+    agreements = agreements.map(enrichAgreement);
+    
+    // 3. Apply Status Filter (Case-Insensitive)
     if (req.query.status && req.query.status.toLowerCase() !== 'all') {
       const targetStatus = req.query.status.trim().toLowerCase();
       agreements = agreements.filter(a => {
-        const status = a.agreement_status || a.status; // Check both fields
-        return String(status || '').trim().toLowerCase() === targetStatus;
+        const s = String(a.agreement_status || a.status || '').trim().toLowerCase();
+        return s === targetStatus;
       });
     }
     
-    // STEP 3: Apply Residence Filter
-    if (req.query.residence_id) {
-      agreements = agreements.filter(a =>
-        a.agreement_residence_id === req.query.residence_id
-      );
+    // 4. Apply Renewal Status Filter (Past Due / Due Soon)
+    if (req.query.renewal_status) {
+      const targetRenewal = req.query.renewal_status;
+      agreements = agreements.filter(a => a.computed_renewal_status === targetRenewal);
     }
     
-    // STEP 4: Enrich with Virtual Fields (Calculated Dates)
-    agreements = agreements.map(enrichAgreement);
-    
-    // STEP 5: Apply Renewal Status Filter (After Enrichment)
-    if (req.query.renewal_status) {
-      agreements = agreements.filter(a =>
-        a.computed_renewal_status === req.query.renewal_status
-      );
+    // 5. Apply Residence Filter
+    if (req.query.residence_id) {
+      agreements = agreements.filter(a => a.agreement_residence_id === req.query.residence_id);
     }
     
     res.json(agreements);

@@ -46,7 +46,7 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
   const [pageSize, setPageSize] = useState(10);
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('active'); // 'active' | 'inactive' | 'all'
-  const [renewalStatusFilter, setRenewalStatusFilter] = useState(null); // 'Past Due' | 'Due Soon' | 'Safe' | null
+  const [renewalStatusFilter, setRenewalStatusFilter] = useState(null); // 'Past Due' | 'Due Soon' | null
   const [residenceIdFilter, setResidenceIdFilter] = useState(null); // string | null
   const [isMobile, setIsMobile] = useState(false);
   const [form] = Form.useForm();
@@ -601,9 +601,6 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
         if (status === 'Due Soon') {
           return <Tag color="orange">Due Soon</Tag>;
         }
-        if (status === 'Safe') {
-          return <Tag color="green">Safe</Tag>;
-        }
         return <Tag>{status}</Tag>;
       },
     },
@@ -761,7 +758,6 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
             >
               <Option value="Past Due">Past Due ({renewalCounts.pastDue})</Option>
               <Option value="Due Soon">Due Soon ({renewalCounts.due90})</Option>
-              <Option value="Safe">Safe</Option>
             </Select>
           </Col>
           <Col xs={24} sm={12} md={8} lg={6}>
@@ -887,9 +883,6 @@ const Agreements = ({ initialFilter, onFilterClear }) => {
                         }
                         if (status === 'Due Soon') {
                           return <Tag color="orange">Due Soon</Tag>;
-                        }
-                        if (status === 'Safe') {
-                          return <Tag color="green">Safe</Tag>;
                         }
                         return <Tag>{status}</Tag>;
                       })()}

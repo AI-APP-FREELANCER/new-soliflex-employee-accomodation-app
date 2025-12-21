@@ -9,12 +9,24 @@ router.use(authenticateToken);
 // GET all employees with optional status filter
 router.get('/', (req, res) => {
   try {
-    const statusFilter = req.query.status || 'active'; // Default to 'active'
-    const employees = excelReader.getEmployees(statusFilter);
+    let employees = excelReader.getEmployees('all');
+    
+    // Manual Status Filter
+    if (req.query.status && req.query.status.toLowerCase() !== 'all') {
+      const targetStatus = req.query.status.trim().toLowerCase();
+      employees = employees.filter(e => {
+        const s = String(e.status || e.employee_status || '').trim().toLowerCase();
+        // Handle 'active' logic including legacy empty fields
+        if (targetStatus === 'active') {
+          return s === 'active' || s === '';
+        }
+        return s === targetStatus;
+      });
+    }
+    
     res.json(employees);
   } catch (error) {
-    console.error('Error fetching employees:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message });
   }
 });
 
