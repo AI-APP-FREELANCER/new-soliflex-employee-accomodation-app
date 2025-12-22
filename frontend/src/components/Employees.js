@@ -13,7 +13,6 @@ import {
   Typography,
   Dropdown,
   Card,
-  Modal,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined } from '@ant-design/icons';
 import { employeeAPI, agreementAPI } from '../services/api';
@@ -32,7 +31,7 @@ const Employees = () => {
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [pageSize, setPageSize] = useState(10);
   const [searchText, setSearchText] = useState('');
-  const [statusFilter, setStatusFilter] = useState('active'); // 'active', 'inactive', 'all'
+  const [statusFilter, setStatusFilter] = useState('Active'); // Default to 'Active' Title Case
   const [isMobile, setIsMobile] = useState(false);
   const [form] = Form.useForm();
   const tableRef = useRef(null);
@@ -50,13 +49,13 @@ const Employees = () => {
   useEffect(() => {
     fetchEmployees();
     fetchAgreements();
-  }, [statusFilter]);
+  }, []); // Only fetch once on mount, filter handled client-side
 
   const fetchEmployees = async () => {
     setLoading(true);
     try {
-      // CHANGE: Fetch 'all' to ensure we get every record, status is handled by backend now
-      const response = await employeeAPI.getAll('all'); 
+      // FIX: Fetch 'all' so the frontend has the full dataset to filter
+      const response = await employeeAPI.getAll('all');
       
       let data = [];
       if (Array.isArray(response.data)) {
@@ -77,8 +76,10 @@ const Employees = () => {
 
   const fetchAgreements = async () => {
     try {
-      const response = await agreementAPI.getAll();
-      setAgreements(response.data);
+      // Ensure agreements fetch 'all' too for dropdown population
+      const response = await agreementAPI.getAll('all');
+      const data = Array.isArray(response.data) ? response.data : (response.data?.data || []);
+      setAgreements(data);
     } catch (error) {
       console.error(error);
     }
@@ -94,6 +95,7 @@ const Employees = () => {
     form.setFieldsValue({
       ...record,
       employee_date_of_joining: record.employee_date_of_joining ? parseDateFromAPI(record.employee_date_of_joining) : null,
+      status: record.status // Ensure status field is mapped correctly
     });
     setSelectedEmployee(record);
     setFormVisible(true);
@@ -122,18 +124,15 @@ const Employees = () => {
   };
 
   // Filter employees based on search text and status
-  // CRITICAL: Always filter from the MASTER employee list to prevent result persistence
   const filteredEmployees = useMemo(() => {
-    // Get the master list - this is the source of truth, never filtered data
     let result = employees;
     
-    // Apply status filter with case-insensitive comparison
-    if (statusFilter && statusFilter !== 'all') {
-      const normalize = (str) => String(str || '').trim().toLowerCase();
+    // Apply status filter 
+    if (statusFilter && statusFilter !== 'All') {
       result = result.filter(employee => {
-        const employeeStatus = normalize(employee.employee_status || employee.status);
-        const filterStatus = normalize(statusFilter);
-        return employeeStatus === filterStatus;
+        // Backend guarantees 'Active' or 'Inactive' in the 'status' field now
+        const s = String(employee.status || 'Active');
+        return s === statusFilter;
       });
     }
 
@@ -196,7 +195,7 @@ const Employees = () => {
           'Designation': e.employee_designation || '',
           'Date of Joining': e.employee_date_of_joining || '',
           'Allocated Agreement ID': e.emplyee_allocated_agreement_id || 'Not Assigned',
-          'Status': e.employee_status || '',
+          'Status': e.status || '',
         };
       });
 
@@ -261,57 +260,36 @@ const Employees = () => {
       dataIndex: 'status',
       key: 'status',
       render: (status) => {
-        // STRICT LOGIC: Display exactly what backend sends. Default to 'Active' if missing.
-        const s = String(status || 'Active'); 
-        const color = s.toLowerCase() === 'active' ? 'green' : 'default';
-        return <Tag color={color}>{s}</Tag>;
+        // Backend now ensures this is 'Active' or 'Inactive' (Title Case)
+        const color = status === 'Active' ? 'green' : 'red';
+        return <Tag color={color}>{status}</Tag>;
       },
     },
     {
       title: 'Actions',
       key: 'actions',
-      render: (_, record) => {
-        const isInactive = record.status === 'inactive' || record.employee_status === 'Inactive';
-        return (
-          <Space>
-            <Button
-              type="link"
-              icon={<EditOutlined />}
-              onClick={() => handleEdit(record)}
-            >
-              Edit
-            </Button>
-            {!isInactive && (
-              <Button
-                type="link"
-                danger
-                onClick={() => handleDeactivate(record)}
-              >
-                Mark Inactive
-              </Button>
-            )}
-          </Space>
-        );
-      },
+      render: (_, record) => (
+        <Space>
+          <Button
+            type="link"
+            icon={<EditOutlined />}
+            onClick={() => handleEdit(record)}
+          >
+            Edit
+          </Button>
+        </Space>
+      ),
     },
   ];
 
   // Filter active agreements for dropdown
   const activeAgreements = agreements.filter(
-    a => a.agreement_status === 'Active' || a.agreement_status === 'active'
+    a => String(a.agreement_status || '').toLowerCase() === 'active'
   );
 
   const exportMenuItems = [
-    {
-      key: 'pdf',
-      label: 'Download as PDF',
-      icon: <FilePdfOutlined />,
-    },
-    {
-      key: 'excel',
-      label: 'Download as Excel',
-      icon: <FileExcelOutlined />,
-    },
+    { key: 'pdf', label: 'Download as PDF', icon: <FilePdfOutlined /> },
+    { key: 'excel', label: 'Download as Excel', icon: <FileExcelOutlined /> },
   ];
 
   return (
@@ -357,15 +335,14 @@ const Employees = () => {
           onChange={setStatusFilter}
           style={{ width: isMobile ? '100%' : '150px' }}
         >
-          <Option value="active">Show Active</Option>
-          <Option value="inactive">Show Inactive</Option>
-          <Option value="all">Show All</Option>
+          <Option value="Active">Show Active</Option>
+          <Option value="Inactive">Show Inactive</Option>
+          <Option value="All">Show All</Option>
         </Select>
       </div>
 
       <div ref={tableRef}>
         {isMobile ? (
-          // Mobile Card View
           <div>
             {filteredEmployees.map((employee) => {
               const fullName = [
@@ -386,51 +363,14 @@ const Employees = () => {
                       block
                     >
                       Edit
-                    </Button>,
-                    ...((employee.status !== 'inactive' && employee.employee_status !== 'Inactive') ? [
-                      <Button
-                        key="deactivate"
-                        type="link"
-                        danger
-                        onClick={() => handleDeactivate(employee)}
-                        block
-                      >
-                        Mark Inactive
-                      </Button>
-                    ] : [])
+                    </Button>
                   ]}
                 >
                   <Space direction="vertical" style={{ width: '100%' }} size="small">
-                    <div>
-                      <Text strong>Employee ID: </Text>
-                      <Text>{employee.employee_id}</Text>
-                    </div>
-                    <div>
-                      <Text strong>Name: </Text>
-                      <Text>{fullName}</Text>
-                    </div>
-                    <div>
-                      <Text strong>Department: </Text>
-                      <Text>{employee.employee_department || 'N/A'}</Text>
-                    </div>
-                    <div>
-                      <Text strong>Designation: </Text>
-                      <Text>{employee.employee_designation || 'N/A'}</Text>
-                    </div>
-                    <div>
-                      <Text strong>Date of Joining: </Text>
-                      <Text>{formatDateForDisplay(employee.employee_date_of_joining) || 'N/A'}</Text>
-                    </div>
-                    <div>
-                      <Text strong>Allocated Agreement: </Text>
-                      <Text>{employee.emplyee_allocated_agreement_id || 'Not Assigned'}</Text>
-                    </div>
-                    <div>
-                      <Text strong>Status: </Text>
-                      <Tag color={employee.employee_status === 'Active' ? 'green' : 'red'}>
-                        {employee.employee_status}
-                      </Tag>
-                    </div>
+                    <div><Text strong>Employee ID: </Text><Text>{employee.employee_id}</Text></div>
+                    <div><Text strong>Name: </Text><Text>{fullName}</Text></div>
+                    <div><Text strong>Department: </Text><Text>{employee.employee_department || 'N/A'}</Text></div>
+                    <div><Text strong>Status: </Text><Tag color={employee.status === 'Active' ? 'green' : 'red'}>{employee.status}</Tag></div>
                   </Space>
                 </Card>
               );
@@ -442,7 +382,6 @@ const Employees = () => {
             )}
           </div>
         ) : (
-          // Desktop Table View
           <div style={{ overflowX: 'auto' }}>
               <Table
                 columns={columns}
@@ -454,16 +393,15 @@ const Employees = () => {
                   pageSize: pageSize,
                   showSizeChanger: true,
                   pageSizeOptions: ['10', '25', '50', '100'],
-                  onShowSizeChange: (current, size) => {
-                    setPageSize(size);
-                  },
+                  onShowSizeChange: (current, size) => setPageSize(size),
                 }}
+                locale={{ emptyText: <div style={{ textAlign: 'center', padding: '20px' }}>No employees found</div> }}
               />
           </div>
         )}
       </div>
 
-      {/* Create/Edit Form Drawer */}
+      {/* Drawer */}
       <Drawer
         title={selectedEmployee ? 'Edit Employee' : 'Add Employee'}
         placement="right"
@@ -475,125 +413,37 @@ const Employees = () => {
         open={formVisible}
         footer={null}
       >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleSubmit}
-        >
+        <Form form={form} layout="vertical" onFinish={handleSubmit}>
           {!selectedEmployee && (
-            <Form.Item
-              name="employee_id"
-              label="Employee ID"
-              rules={[{ required: true, message: 'Please input employee ID!' }]}
-            >
+            <Form.Item name="employee_id" label="Employee ID" rules={[{ required: true }]}>
               <Input placeholder="Alphanumeric employee ID" />
             </Form.Item>
           )}
-
-          <Form.Item
-            name="employee_first_name"
-            label="First Name"
-          >
-            <Input />
+          <Form.Item name="employee_first_name" label="First Name"><Input /></Form.Item>
+          <Form.Item name="employee_last_name" label="Last Name"><Input /></Form.Item>
+          <Form.Item name="employee_department" label="Department"><Input /></Form.Item>
+          <Form.Item name="employee_designation" label="Designation"><Input /></Form.Item>
+          <Form.Item name="employee_date_of_joining" label="Date of Joining">
+            <DatePicker style={{ width: '100%' }} format="DD-MM-YYYY" />
           </Form.Item>
-
-          <Form.Item
-            name="employee_last_name"
-            label="Last Name"
-          >
-            <Input />
-          </Form.Item>
-
-          <Form.Item
-            name="employee_sir_name"
-            label="Sir Name"
-          >
-            <Input />
-          </Form.Item>
-
-          <Form.Item
-            name="employee_department"
-            label="Department"
-          >
-            <Input />
-          </Form.Item>
-
-          <Form.Item
-            name="employee_designation"
-            label="Designation"
-          >
-            <Input />
-          </Form.Item>
-
-          <Form.Item
-            name="employee_date_of_joining"
-            label="Date of Joining (DD-MM-YYYY)"
-            rules={[
-              {
-                validator: (_, value) => {
-                  if (!value) return Promise.resolve();
-                  const year = value.year();
-                  if (year < 2023 || year > 2100) {
-                    return Promise.reject(new Error('Date must be between 2023 and 2100'));
-                  }
-                  return Promise.resolve();
-                },
-              },
-            ]}
-          >
-            <DatePicker 
-              style={{ width: '100%' }} 
-              format="DD-MM-YYYY"
-              disabledDate={(current) => {
-                if (!current) return false;
-                return current.isBefore(getMinDate(), 'day') || current.isAfter(getMaxDate(), 'day');
-              }}
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="emplyee_allocated_agreement_id"
-            label="Allocated Agreement ID"
-            help="Link employee to an agreement (Foreign Key)"
-          >
-            <Select
-              placeholder="Select Agreement"
-              allowClear
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-            >
-              {activeAgreements.map((agreement) => (
-                <Option key={agreement.agreement_id} value={agreement.agreement_id} label={agreement.agreement_id}>
-                  {agreement.agreement_id} - {agreement.agreement_residence_id}
-                </Option>
+          <Form.Item name="emplyee_allocated_agreement_id" label="Allocated Agreement ID">
+            <Select allowClear showSearch>
+              {activeAgreements.map((a) => (
+                <Option key={a.agreement_id} value={a.agreement_id}>{a.agreement_id}</Option>
               ))}
             </Select>
           </Form.Item>
-
-          <Form.Item
-            name="employee_status"
-            label="Status"
-            rules={[{ required: true, message: 'Please select status!' }]}
-          >
+          {/* UPDATED: Status field maps to 'status' now */}
+          <Form.Item name="status" label="Status" rules={[{ required: true }]}>
             <Select>
               <Option value="Active">Active</Option>
               <Option value="Inactive">Inactive</Option>
             </Select>
           </Form.Item>
-
           <Form.Item>
             <Space>
-              <Button type="primary" htmlType="submit">
-                {selectedEmployee ? 'Update' : 'Create'}
-              </Button>
-              <Button onClick={() => {
-                setFormVisible(false);
-                form.resetFields();
-              }}>
-                Cancel
-              </Button>
+              <Button type="primary" htmlType="submit">{selectedEmployee ? 'Update' : 'Create'}</Button>
+              <Button onClick={() => setFormVisible(false)}>Cancel</Button>
             </Space>
           </Form.Item>
         </Form>
@@ -603,4 +453,3 @@ const Employees = () => {
 };
 
 export default Employees;
-
