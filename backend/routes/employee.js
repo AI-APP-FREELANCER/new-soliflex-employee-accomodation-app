@@ -9,9 +9,7 @@ router.use(authenticateToken);
 const normalizeEmployee = (emp) => {
   // Check all possible status keys
   let rawStatus = emp.status || emp.employee_status || '';
-  rawStatus = String(rawStatus).trim();
-
-  // If "Inactive" (case insensitive) -> Inactive
+    // If "Inactive" (case insensitive) -> Inactive
   // If Empty, Null, or anything else -> Active (Default)
   const status = rawStatus.toLowerCase() === 'inactive' ? 'Inactive' : 'Active';
 

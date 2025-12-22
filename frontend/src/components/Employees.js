@@ -55,8 +55,18 @@ const Employees = () => {
   const fetchEmployees = async () => {
     setLoading(true);
     try {
-      const response = await employeeAPI.getAll(statusFilter);
-      setEmployees(response.data);
+      // CHANGE: Fetch 'all' to ensure we get every record, status is handled by backend now
+      const response = await employeeAPI.getAll('all'); 
+      
+      let data = [];
+      if (Array.isArray(response.data)) {
+        data = response.data;
+      } else if (response.data && Array.isArray(response.data.data)) {
+        data = response.data.data;
+      }
+      
+      console.log(`[Employees] Fetched ${data.length} records`);
+      setEmployees(data);
     } catch (error) {
       message.error('Failed to fetch employees');
       console.error(error);
@@ -248,13 +258,14 @@ const Employees = () => {
     },
     {
       title: 'Status',
-      dataIndex: 'employee_status',
-      key: 'employee_status',
-      render: (status) => (
-        <Tag color={status === 'Active' ? 'green' : 'red'}>
-          {status}
-        </Tag>
-      ),
+      dataIndex: 'status',
+      key: 'status',
+      render: (status) => {
+        // STRICT LOGIC: Display exactly what backend sends. Default to 'Active' if missing.
+        const s = String(status || 'Active'); 
+        const color = s.toLowerCase() === 'active' ? 'green' : 'default';
+        return <Tag color={color}>{s}</Tag>;
+      },
     },
     {
       title: 'Actions',
