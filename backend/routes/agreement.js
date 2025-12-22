@@ -9,112 +9,105 @@ const timezone = require('dayjs/plugin/timezone');
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-// All routes require authentication
 router.use(authenticateToken);
 
-/**
- * Enrich agreement with virtual fields and Normalize Status
- */
+// --- HELPER: Fix NaN Issues ---
+const parseCurrency = (val) => {
+  if (val === undefined || val === null || val === '') return 0;
+  if (typeof val === 'number') return val;
+  // Remove commas, currency symbols, leave only digits, dots, minus
+  const clean = String(val).replace(/[^\d.-]/g, '');
+  const num = parseFloat(clean);
+  return isNaN(num) ? 0 : num;
+};
+
+// --- HELPER: Enrich & Normalize ---
 function enrichAgreement(agreement) {
   const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
-  const renewalDueDate = agreement.agreement_renewal_due_date;
   
-  // --- ROBUST STATUS NORMALIZATION ---
-  // 1. Get raw status from possible fields
-  let rawStatus = agreement.status || agreement.agreement_status || '';
-  // 2. Convert to string, trim whitespace
-  rawStatus = String(rawStatus).trim();
-  // 3. Normalize to Title Case (e.g. "active" -> "Active", "INACTIVE" -> "Inactive")
-  //    This ensures the Frontend sees consistent "Active" or "Inactive" tags.
-  const normalizedStatus = rawStatus.length > 0 
-    ? rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1).toLowerCase() 
-    : 'Active'; // Default to Active if missing
+  // 1. Fix Currency Fields
+  agreement.agreement_monthly_rent_amount = parseCurrency(agreement.agreement_monthly_rent_amount);
+  agreement.agreement_advance_amount = parseCurrency(agreement.agreement_advance_amount);
 
-  // Overwrite with clean status
+  // 2. Robust Status Normalization
+  // Check both key variations. Trim whitespace.
+  let rawStatus = agreement.agreement_status || agreement.status || '';
+  rawStatus = String(rawStatus).trim();
+  
+  // Logic: If explicitly "Inactive", set Inactive. Otherwise (Active, active, "", null) -> Active.
+  let normalizedStatus = 'Active';
+  if (rawStatus.toLowerCase() === 'inactive') {
+    normalizedStatus = 'Inactive';
+  }
+  
+  // Update the object
   agreement.agreement_status = normalizedStatus;
 
+  // 3. Renewal Logic
+  const renewalDueDate = agreement.agreement_renewal_due_date;
   const isInactive = normalizedStatus === 'Inactive';
   
-  // If renewal date is missing or agreement is inactive, return N/A for renewal logic
   if (!renewalDueDate || isInactive) {
-    return {
-      ...agreement,
+    return { 
+      ...agreement, 
       computed_renewal_status: 'N/A',
       days_until_renewal: null,
       formatted_renewal_date: null
     };
   }
   
-  // Parse renewal date robustly
-  let dueDate;
-  try {
-    // Try parsing as ISO string first
-    dueDate = dayjs.tz(renewalDueDate, 'Asia/Kolkata').startOf('day');
-    if (!dueDate.isValid()) {
-      // Try parsing as YYYY-MM-DD format
-      dueDate = dayjs(renewalDueDate, 'YYYY-MM-DD', true).tz('Asia/Kolkata').startOf('day');
-    }
-  } catch (error) {
-    return { ...agreement, computed_renewal_status: 'N/A', days_until_renewal: null };
+  let dueDate = dayjs.tz(renewalDueDate, 'Asia/Kolkata').startOf('day');
+  if (!dueDate.isValid()) {
+    dueDate = dayjs(renewalDueDate, 'YYYY-MM-DD').tz('Asia/Kolkata').startOf('day');
   }
   
   if (!dueDate.isValid()) {
     return { ...agreement, computed_renewal_status: 'N/A', days_until_renewal: null };
   }
   
-  // Calculate days until renewal (negative for past due)
   const daysUntilRenewal = dueDate.diff(today, 'day');
   const ninetyDaysFromNow = today.add(90, 'day');
   
-  // Determine renewal status
   let computedStatus = 'Safe';
   if (dueDate.isBefore(today, 'day')) {
     computedStatus = 'Past Due';
-  } else if (dueDate.isSame(today, 'day') || 
-             (dueDate.isAfter(today, 'day') && dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day'))) {
+  } else if (dueDate.isSame(today, 'day') || dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'))) {
     computedStatus = 'Due Soon';
   }
   
-  return {
-    ...agreement,
-    computed_renewal_status: computedStatus,
-    days_until_renewal: daysUntilRenewal,
-    formatted_renewal_date: dueDate.format('YYYY-MM-DD')
+  return { 
+    ...agreement, 
+    computed_renewal_status: computedStatus, 
+    days_until_renewal: daysUntilRenewal, 
+    formatted_renewal_date: dueDate.format('YYYY-MM-DD') 
   };
 }
 
-// GET all agreements with Server-Side Filtering override
+// GET / - Fetch All with Filters
 router.get('/', (req, res) => {
   try {
-    // 1. ALWAYS fetch ALL data to bypass Excel Reader bugs
+    // 1. Fetch ALL data (Bypass reader filtering)
     let agreements = excelReader.getAgreements('all');
     
-    // 2. Enrich & Normalize FIRST
+    // 2. Enrich & Normalize
     agreements = agreements.map(enrichAgreement);
 
-    // 3. Manual Status Filter (Robust Case-Insensitive)
+    // 3. Apply Status Filter
     if (req.query.status && req.query.status.toLowerCase() !== 'all') {
-      const targetStatus = req.query.status.trim().toLowerCase(); // e.g. 'active'
-      agreements = agreements.filter(a => {
-        // Compare against the normalized status we created in enrichAgreement
-        return a.agreement_status.toLowerCase() === targetStatus;
-      });
+      const target = req.query.status.trim().toLowerCase();
+      agreements = agreements.filter(a => a.agreement_status.toLowerCase() === target);
     }
     
-    // 4. Filter by residence_id
-    if (req.query.residence_id) {
-      agreements = agreements.filter(a => 
-        a.agreement_residence_id === req.query.residence_id
-      );
-    }
-    
-    // 5. Filter by renewal_status
+    // 4. Apply Renewal Filter
     if (req.query.renewal_status) {
-      agreements = agreements.filter(a => 
-        a.computed_renewal_status === req.query.renewal_status
-      );
+      agreements = agreements.filter(a => a.computed_renewal_status === req.query.renewal_status);
     }
-    
+
+    // 5. Apply Residence Filter
+    if (req.query.residence_id) {
+      agreements = agreements.filter(a => a.agreement_residence_id === req.query.residence_id);
+    }
+
     res.json(agreements);
   } catch (error) {
     console.error('Error fetching agreements:', error);
@@ -122,12 +115,11 @@ router.get('/', (req, res) => {
   }
 });
 
-// GET active agreements only (Legacy support)
+// GET /active - Legacy Route
 router.get('/active', (req, res) => {
   try {
     const agreements = excelReader.getAgreements('all');
     const enriched = agreements.map(enrichAgreement);
-    // Filter using our robust normalized status
     const activeOnly = enriched.filter(a => a.agreement_status === 'Active');
     res.json(activeOnly);
   } catch (error) {
@@ -136,15 +128,13 @@ router.get('/active', (req, res) => {
   }
 });
 
-// GET agreement by ID
+// GET /:id - Single Agreement
 router.get('/:id', (req, res) => {
   try {
     const agreements = excelReader.getAgreements('all');
     const agreement = agreements.find(a => a.agreement_id === req.params.id);
     
-    if (!agreement) {
-      return res.status(404).json({ error: 'Agreement not found' });
-    }
+    if (!agreement) return res.status(404).json({ error: 'Agreement not found' });
     
     res.json(enrichAgreement(agreement));
   } catch (error) {
@@ -153,7 +143,7 @@ router.get('/:id', (req, res) => {
   }
 });
 
-// GET agreements by residence_id
+// GET /residence/:residenceId - By Residence
 router.get('/residence/:residenceId', (req, res) => {
   try {
     const agreements = excelReader.getAgreements('all');
@@ -167,11 +157,11 @@ router.get('/residence/:residenceId', (req, res) => {
   }
 });
 
-// POST create new agreement
+// POST / - Create
 router.post('/', (req, res) => {
   try {
     const data = req.body;
-    
+    // Auto-ID Logic
     if (!data.agreement_id) {
       const agreements = excelReader.getAgreements();
       const maxId = agreements.length > 0 
@@ -182,10 +172,7 @@ router.post('/', (req, res) => {
         : 0;
       data.agreement_id = `agreement_${String(maxId + 1).padStart(3, '0')}`;
     }
-    
-    if (!data.agreement_status) {
-      data.agreement_status = 'Active';
-    }
+    if (!data.agreement_status) data.agreement_status = 'Active';
     
     const newAgreement = excelReader.addAgreement(data);
     res.status(201).json(newAgreement);
@@ -195,18 +182,15 @@ router.post('/', (req, res) => {
   }
 });
 
-// PUT update agreement
+// PUT /:id - Update
 router.put('/:id', (req, res) => {
   try {
     const agreementId = req.params.id;
     const updates = req.body;
-    delete updates.agreement_id;
+    delete updates.agreement_id; // Don't allow changing ID
     
     const updatedAgreement = excelReader.updateAgreement(agreementId, updates);
-    
-    if (!updatedAgreement) {
-      return res.status(404).json({ error: 'Agreement not found' });
-    }
+    if (!updatedAgreement) return res.status(404).json({ error: 'Agreement not found' });
     
     res.json(updatedAgreement);
   } catch (error) {
@@ -215,17 +199,14 @@ router.put('/:id', (req, res) => {
   }
 });
 
-// PATCH deactivate agreement
+// PATCH /:id/deactivate - Deactivate
 router.patch('/:id/deactivate', (req, res) => {
   try {
     const agreementId = req.params.id;
     const reason = req.body.reason || 'Marked inactive by user';
     
     const deactivatedAgreement = excelReader.deactivateAgreement(agreementId, reason);
-    
-    if (!deactivatedAgreement) {
-      return res.status(404).json({ error: 'Agreement not found' });
-    }
+    if (!deactivatedAgreement) return res.status(404).json({ error: 'Agreement not found' });
     
     res.json(deactivatedAgreement);
   } catch (error) {

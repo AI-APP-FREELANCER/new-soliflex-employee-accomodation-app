@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Table, Card, Button, Input, Tag, Space, Select, DatePicker, message, Modal, Form, Row, Col, Typography, Spin, Empty } from 'antd';
-import { SearchOutlined, PlusOutlined, EditOutlined, EyeOutlined, FileTextOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Table, Card, Button, Input, Tag, Space, Select, DatePicker, message, Modal, Form, Row, Col, Typography, Empty } from 'antd';
+import { SearchOutlined, PlusOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons';
 import { agreementAPI, residenceAPI } from '../services/api';
 import dayjs from 'dayjs';
-import { parseDateFromAPI, formatDateForDisplay } from '../utils/dateUtils';
+import { formatDateForDisplay } from '../utils/dateUtils';
 import { useLocation } from 'react-router-dom';
 
 const { Title, Text } = Typography;
@@ -13,9 +13,11 @@ const Agreements = () => {
   const [agreements, setAgreements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState('');
+  // Filters
   const [statusFilter, setStatusFilter] = useState('Active');
   const [residenceFilter, setResidenceFilter] = useState(null);
   const [renewalFilter, setRenewalFilter] = useState(null);
+  
   const [residences, setResidences] = useState([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingAgreement, setEditingAgreement] = useState(null);
@@ -24,7 +26,6 @@ const Agreements = () => {
 
   useEffect(() => {
     fetchResidences();
-    // Parse query params for initial filters
     const searchParams = new URLSearchParams(location.search);
     const filterType = searchParams.get('filter');
     if (filterType === 'pastDue') setRenewalFilter('Past Due');
@@ -33,7 +34,7 @@ const Agreements = () => {
 
   useEffect(() => {
     fetchAgreements();
-  }, []); // Initial fetch
+  }, []);
 
   const fetchResidences = async () => {
     try {
@@ -48,7 +49,7 @@ const Agreements = () => {
   const fetchAgreements = async () => {
     setLoading(true);
     try {
-      // Fetch 'all' to get everything and let frontend/backend filtering handle the rest
+      // Always fetch ALL to ensure filters work on full dataset
       const response = await agreementAPI.getAll('all');
       
       let data = [];
@@ -57,18 +58,15 @@ const Agreements = () => {
       } else if (response.data && Array.isArray(response.data.data)) {
         data = response.data.data;
       }
-
-      console.log(`[Agreements] Fetched ${data.length} records.`);
       setAgreements(data);
     } catch (error) {
       message.error('Failed to fetch agreements');
-      console.error(error);
     } finally {
       setLoading(false);
     }
   };
 
-  // --- ROBUST FRONTEND FILTERING ---
+  // --- ROBUST FILTER LOGIC ---
   const filteredAgreements = useMemo(() => {
     let result = agreements;
 
@@ -86,7 +84,7 @@ const Agreements = () => {
       result = result.filter(item => item.agreement_residence_id === residenceFilter);
     }
 
-    // 3. Renewal Urgency Filter
+    // 3. Renewal Urgency Filter (Matches Backend Calculation)
     if (renewalFilter) {
       result = result.filter(item => item.computed_renewal_status === renewalFilter);
     }
@@ -131,22 +129,11 @@ const Agreements = () => {
         if (!record.agreement_renewal_due_date) return <Text type="secondary">N/A</Text>;
         const dateStr = formatDateForDisplay(record.agreement_renewal_due_date);
         
-        // Show Urgency Tags based on backend calculation
         if (record.computed_renewal_status === 'Past Due') {
-          return (
-            <Space direction="vertical" size={0}>
-              <Text type="danger" strong>{dateStr}</Text>
-              <Tag color="red">Past Due</Tag>
-            </Space>
-          );
+          return <Tag color="red">{dateStr} (Past Due)</Tag>;
         }
         if (record.computed_renewal_status === 'Due Soon') {
-          return (
-            <Space direction="vertical" size={0}>
-              <Text type="warning" strong>{dateStr}</Text>
-              <Tag color="orange">Due Soon</Tag>
-            </Space>
-          );
+          return <Tag color="orange">{dateStr} (Due Soon)</Tag>;
         }
         return <Text>{dateStr}</Text>;
       }
@@ -157,10 +144,7 @@ const Agreements = () => {
       key: 'agreement_status',
       render: (status) => {
         const s = String(status || '').toLowerCase();
-        const color = s === 'active' ? 'green' : 'default';
-        // Display strictly "Active" or "Inactive"
-        const display = s === 'active' ? 'Active' : 'Inactive';
-        return <Tag color={color}>{display}</Tag>;
+        return <Tag color={s === 'active' ? 'green' : 'default'}>{s === 'active' ? 'Active' : 'Inactive'}</Tag>;
       },
     },
     {
@@ -176,7 +160,6 @@ const Agreements = () => {
 
   const handleEdit = (record) => {
     setEditingAgreement(record);
-    // Pre-fill form
     form.setFieldsValue({
       ...record,
       agreement_renewal_due_date: record.agreement_renewal_due_date ? dayjs(record.agreement_renewal_due_date) : null
@@ -187,22 +170,21 @@ const Agreements = () => {
   const handleModalOk = async () => {
     try {
       const values = await form.validateFields();
-      // Format date for API
       if (values.agreement_renewal_due_date) {
         values.agreement_renewal_due_date = values.agreement_renewal_due_date.format('YYYY-MM-DD');
       }
 
       if (editingAgreement) {
         await agreementAPI.update(editingAgreement.agreement_id, values);
-        message.success('Agreement updated successfully');
+        message.success('Agreement updated');
       } else {
         await agreementAPI.create(values);
-        message.success('Agreement created successfully');
+        message.success('Agreement created');
       }
       setIsModalVisible(false);
       setEditingAgreement(null);
       form.resetFields();
-      fetchAgreements(); // Refresh data
+      fetchAgreements();
     } catch (error) {
       message.error('Operation failed');
     }
@@ -224,7 +206,7 @@ const Agreements = () => {
         <Row gutter={[16, 16]} align="middle">
           <Col xs={24} sm={6}>
             <Input 
-              placeholder="Search ID, Residence, Name..." 
+              placeholder="Search ID, Residence..." 
               prefix={<SearchOutlined />} 
               value={searchText}
               onChange={e => setSearchText(e.target.value)}
@@ -251,8 +233,7 @@ const Agreements = () => {
               allowClear
             >
               <Option value="Past Due">Past Due</Option>
-              <Option value="Due Soon">Due Soon (90 Days)</Option>
-              {/* "Safe" option removed as requested */}
+              <Option value="Due Soon">Due Soon</Option>
             </Select>
           </Col>
           <Col xs={24} sm={6}>
@@ -279,7 +260,7 @@ const Agreements = () => {
         rowKey="agreement_id"
         loading={loading}
         pagination={{ pageSize: 10 }}
-        locale={{ emptyText: <Empty description="No agreements found matching filters" /> }}
+        locale={{ emptyText: <Empty description="No agreements found" /> }}
       />
 
       <Modal
@@ -290,10 +271,11 @@ const Agreements = () => {
         width={800}
       >
         <Form form={form} layout="vertical">
+          {/* Form Fields Preserved */}
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item name="agreement_id" label="Agreement ID">
-                <Input disabled={!!editingAgreement} placeholder="Auto-generated if empty" />
+                <Input disabled={!!editingAgreement} placeholder="Auto-generated" />
               </Form.Item>
             </Col>
             <Col span={12}>

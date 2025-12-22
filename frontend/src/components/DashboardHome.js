@@ -41,7 +41,7 @@ const DashboardHome = () => {
   const [alerts, setAlerts] = useState([]);
   const navigate = useNavigate();
 
-  // Helper to extract data array regardless of API wrapper
+  // Helper to safely extract arrays from API responses
   const extractArray = (response) => {
     if (!response) return [];
     if (Array.isArray(response)) return response;
@@ -50,27 +50,26 @@ const DashboardHome = () => {
     return [];
   };
 
-  // Helper to normalize IDs for matching (Trim + Lowercase)
+  // Helper to normalize IDs (lowercase + trim) for matching
   const normalizeId = (id) => String(id || '').trim().toLowerCase();
 
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      // Fetch all data in parallel
       const [residencesRes, employeesRes, agreementsRes] = await Promise.all([
         residenceAPI.getAll(),
         employeeAPI.getAll(),
-        agreementAPI.getAll('all') // Fetch ALL to ensure we see everything
+        agreementAPI.getAll('all') // Fetch ALL to ensure correct counts
       ]);
 
       const residences = extractArray(residencesRes);
       const employees = extractArray(employeesRes);
       const agreements = extractArray(agreementsRes);
 
-      console.log('Dashboard Data Fetched:', { 
-        residences: residences.length, 
-        employees: employees.length, 
-        agreements: agreements.length 
+      console.log('Dashboard Data Loaded:', { 
+        res: residences.length, 
+        emp: employees.length, 
+        agr: agreements.length 
       });
 
       calculateStats(residences, employees, agreements);
@@ -89,25 +88,24 @@ const DashboardHome = () => {
   }, []);
 
   const calculateStats = (residences, employees, agreements) => {
-    // 1. Calculate Active/Total counts
+    // Filter Active Agreements
     const activeAgreements = agreements.filter(a => 
       String(a.agreement_status || '').toLowerCase() === 'active'
     );
     
-    // 2. Financials
+    // Calculate Financials
     const totalRent = activeAgreements.reduce((sum, a) => {
-      // Robust number parsing
       const amount = parseFloat(String(a.agreement_monthly_rent_amount || '0').replace(/[^\d.-]/g, ''));
       return sum + (isNaN(amount) ? 0 : amount);
     }, 0);
 
-    // 3. Occupancy
+    // Calculate Occupancy
     const totalCapacity = residences.reduce((sum, r) => sum + (Number(r.residence_capacity) || 0), 0);
     const totalOccupants = employees.filter(e => 
       String(e.status || '').toLowerCase() === 'active'
     ).length;
     
-    // 4. Renewals Logic
+    // Calculate Renewal Alerts
     const today = dayjs();
     const ninetyDaysOut = today.add(90, 'day');
     
@@ -134,12 +132,11 @@ const DashboardHome = () => {
   };
 
   const generateCharts = (residences, employees, agreements) => {
-    // 1. Residence Status (Pie)
-    const statusCounts = { Active: 0, Inactive: 0, Maintenance: 0 };
+    // 1. Residence Status Chart
+    const statusCounts = {};
     residences.forEach(r => {
-      const s = String(r.residence_status || 'Active'); // Default to Active
-      if (statusCounts[s] !== undefined) statusCounts[s]++;
-      else statusCounts['Active']++;
+      const s = String(r.residence_status || 'Active'); 
+      statusCounts[s] = (statusCounts[s] || 0) + 1;
     });
     
     const residenceStatusData = Object.keys(statusCounts).map(status => ({
@@ -147,23 +144,20 @@ const DashboardHome = () => {
       value: statusCounts[status]
     })).filter(d => d.value > 0);
 
-    // 2. Cost by Department (Pro-Rata Calculation)
+    // 2. Cost by Department (Pro-Rata Logic)
     const costMap = {};
     const activeEmployees = employees.filter(e => String(e.status).toLowerCase() === 'active');
     
-    // Build Occupant Counts per Residence (Normalized ID)
     const occupantsPerRes = {};
     activeEmployees.forEach(emp => {
       const rid = normalizeId(emp.residence_id || emp.allocated_residence_id);
       if (rid) occupantsPerRes[rid] = (occupantsPerRes[rid] || 0) + 1;
     });
 
-    // Distribute Rent
     activeEmployees.forEach(emp => {
       const rid = normalizeId(emp.residence_id || emp.allocated_residence_id);
       const dept = emp.department || 'Unassigned';
       
-      // Find matching agreement
       const agreement = agreements.find(a => 
         normalizeId(a.agreement_residence_id) === rid && 
         String(a.agreement_status).toLowerCase() === 'active'
@@ -179,12 +173,12 @@ const DashboardHome = () => {
     const costByDeptData = Object.keys(costMap).map(dept => ({
       department: dept,
       cost: Math.round(costMap[dept])
-    })).sort((a, b) => b.cost - a.cost).slice(0, 8); // Top 8
+    })).sort((a, b) => b.cost - a.cost).slice(0, 8); 
 
     setChartsData({
       residenceStatus: residenceStatusData,
       costByDepartment: costByDeptData,
-      employeeDistribution: [] // Placeholder if needed later
+      employeeDistribution: []
     });
   };
 
@@ -200,13 +194,13 @@ const DashboardHome = () => {
       if (due.isBefore(today, 'day')) {
         newAlerts.push({
           id: a.agreement_id,
-          message: `Agreement ${a.agreement_id} is PAST DUE since ${due.format('DD MMM YYYY')}`,
+          message: `Agreement ${a.agreement_id} is PAST DUE (${due.format('DD MMM YYYY')})`,
           type: 'error'
         });
       }
     });
     
-    setAlerts(newAlerts.slice(0, 5)); // Show max 5 alerts
+    setAlerts(newAlerts.slice(0, 5));
   };
 
   return (
@@ -215,7 +209,7 @@ const DashboardHome = () => {
       
       {loading ? <Spin size="large" style={{ display: 'block', margin: '100px auto' }} /> : (
         <>
-          {/* Key Metrics Row */}
+          {/* Key Metrics Cards */}
           <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
             <Col xs={24} sm={12} md={6}>
               <Card>
@@ -258,7 +252,7 @@ const DashboardHome = () => {
             </Col>
           </Row>
 
-          {/* Actionable Alerts & Renewals */}
+          {/* Alerts & Pie Chart Row */}
           <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
             <Col xs={24} md={12}>
               <Card title="Upcoming Renewals & Alerts" extra={<AlertOutlined style={{ color: '#faad14' }} />}>
@@ -304,20 +298,20 @@ const DashboardHome = () => {
                      colorField="type" 
                      radius={0.8} 
                      innerRadius={0.6}
-                     // FIX: Removed 'type: inner' which causes crashes. Used simple text mapping.
+                     /* FIX: Simplified label to prevent crash */
                      label={{ 
-                       text: (d) => String(d.value),
-                       style: { fontSize: 14, fontWeight: 'bold' }
+                       text: 'value',
+                       style: { fontWeight: 'bold' }
                      }}
                      legend={{ position: 'bottom' }}
                      height={250}
                    />
-                 ) : <Empty />}
+                 ) : <Empty description="No Data" />}
                </Card>
             </Col>
           </Row>
 
-          {/* Cost Charts */}
+          {/* Cost Bar Chart Row */}
           <Row gutter={[16, 16]}>
             <Col span={24}>
               <Card title="Monthly Rent Cost by Department (Top 8)">
@@ -327,10 +321,10 @@ const DashboardHome = () => {
                     xField="department" 
                     yField="cost" 
                     color="#1890ff"
-                    // FIX: Simplified label to prevent expression errors
+                    /* FIX: Simplified label */
                     label={{ 
-                      text: (item) => item.cost ? String(item.cost) : '',
-                      style: { fill: '#FFFFFF', opacity: 0.8 }
+                      position: 'middle', 
+                      style: { fill: '#FFFFFF', opacity: 0.6 } 
                     }}
                   />
                 ) : <Empty description="No cost data available (Check Employee-Residence Links)" />}
