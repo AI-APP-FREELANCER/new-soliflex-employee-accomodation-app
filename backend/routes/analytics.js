@@ -3,10 +3,13 @@ const router = express.Router();
 const Agreement = require('../models/Agreement');
 const Residence = require('../models/Residence');
 const Employee = require('../models/Employee');
-const auth = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth'); // FIXED: Destructure the function
+
+// Apply authentication to all routes in this router
+router.use(authenticateToken);
 
 // Get all analytics data
-router.get('/', auth, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const today = new Date();
     // Reset time to start of day for accurate comparison
@@ -19,7 +22,6 @@ router.get('/', auth, async (req, res) => {
     const totalAgreements = await Agreement.countDocuments();
 
     // 2. Agreements Due in <= 90 Days (and not yet past due)
-    // Logic: End date is between Today and Today+90
     const dueAgreements = await Agreement.countDocuments({
       endDate: {
         $gte: today,
@@ -27,15 +29,15 @@ router.get('/', auth, async (req, res) => {
       }
     });
 
-    // 3. Past Due Agreements
-    // Logic: End date is strictly before today
+    // 3. Past Due Agreements (EndDate strictly before today)
     const pastDueAgreements = await Agreement.countDocuments({
       endDate: { $lt: today }
     });
 
-    // 4. Inactive Employees (New Request)
+    // 4. Inactive Employees
+    // Checks for 'Inactive' status (case insensitive)
     const inactiveEmployees = await Employee.countDocuments({
-      status: 'Inactive' 
+      status: { $regex: /^inactive$/i } 
     });
 
     // 5. Occupancy Rate Calculation
@@ -44,37 +46,38 @@ router.get('/', auth, async (req, res) => {
     let totalOccupied = 0;
 
     residences.forEach(res => {
-      // Ensure we treat these as numbers
       const cap = parseInt(res.capacity || 0, 10);
       const occ = parseInt(res.currentOccupancy || 0, 10);
       totalCapacity += cap;
       totalOccupied += occ;
     });
 
-    // Avoid division by zero
     const occupancyRate = totalCapacity > 0 
       ? ((totalOccupied / totalCapacity) * 100).toFixed(1) 
       : 0;
 
     // 6. Monthly Rent Cost by Department (Aggregation)
-    // Assumes Agreement has 'rentAmount' and is linked to 'employee' which has 'department'
+    // Joins Agreement -> Employee to group by department
     const rentByDepartment = await Agreement.aggregate([
       {
         $lookup: {
-          from: 'employees', // Ensure this matches your actual MongoDB collection name (usually lowercase plural)
+          from: 'employees', // Must match your MongoDB collection name (usually lowercase plural)
           localField: 'employee',
           foreignField: '_id',
           as: 'employeeDetails'
         }
       },
       {
-        $unwind: '$employeeDetails' // Deconstruct the array
+        $unwind: '$employeeDetails'
       },
       {
         $group: {
           _id: '$employeeDetails.department',
           totalRent: { $sum: '$rentAmount' }
         }
+      },
+      {
+        $sort: { totalRent: -1 } // Sort by highest rent first
       }
     ]);
 
