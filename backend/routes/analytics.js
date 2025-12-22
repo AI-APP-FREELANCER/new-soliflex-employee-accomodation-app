@@ -1,89 +1,106 @@
 const express = require('express');
 const router = express.Router();
-const Agreement = require('../models/Agreement');
-const Residence = require('../models/Residence');
-const Employee = require('../models/Employee');
-const { authenticateToken } = require('../middleware/auth'); // FIXED: Destructure the function
+const { authenticateToken } = require('../middleware/auth');
+const excelReader = require('../data/excelReader');
 
-// Apply authentication to all routes in this router
 router.use(authenticateToken);
 
-// Get all analytics data
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
   try {
+    // 1. Fetch Data from Excel/CSV
+    const agreements = excelReader.getAgreements('all');
+    const employees = excelReader.getEmployees('all');
+    const residences = excelReader.getResidences();
+
     const today = new Date();
-    // Reset time to start of day for accurate comparison
     today.setHours(0, 0, 0, 0);
 
     const ninetyDaysFromNow = new Date();
     ninetyDaysFromNow.setDate(today.getDate() + 90);
 
-    // 1. Total Agreements
-    const totalAgreements = await Agreement.countDocuments();
+    // --- CALCULATIONS ---
 
-    // 2. Agreements Due in <= 90 Days (and not yet past due)
-    const dueAgreements = await Agreement.countDocuments({
-      endDate: {
-        $gte: today,
-        $lte: ninetyDaysFromNow
+    // 1. Total Agreements
+    const totalAgreements = agreements.length;
+
+    // 2. Due Dates (Past Due & Due <= 90 Days)
+    let dueAgreements = 0;
+    let pastDueAgreements = 0;
+
+    agreements.forEach(ag => {
+      // Check for valid end date
+      if (!ag.agreement_end_date) return;
+      
+      const endDate = new Date(ag.agreement_end_date);
+      // specific check for active status if needed, or count all physical copies
+      const status = ag.status || ag.agreement_status || 'Active'; 
+      
+      // We generally only track due dates for Active agreements
+      if (status.toLowerCase() === 'active') {
+        if (endDate < today) {
+          pastDueAgreements++;
+        } else if (endDate <= ninetyDaysFromNow) {
+          dueAgreements++;
+        }
       }
     });
 
-    // 3. Past Due Agreements (EndDate strictly before today)
-    const pastDueAgreements = await Agreement.countDocuments({
-      endDate: { $lt: today }
+    // 3. Inactive Employees
+    let inactiveEmployees = 0;
+    employees.forEach(emp => {
+      const status = emp.status || emp.employee_status || '';
+      if (status.toLowerCase() === 'inactive') {
+        inactiveEmployees++;
+      }
     });
 
-    // 4. Inactive Employees
-    // Checks for 'Inactive' status (case insensitive)
-    const inactiveEmployees = await Employee.countDocuments({
-      status: { $regex: /^inactive$/i } 
-    });
+    // 4. Occupancy Rate
+    // Formula: (Total Active Employees with Agreements / Total Bed Capacity) * 100
+    // Capacity comes from residence_house_count (assuming house count = capacity, or use specific capacity field if available)
+    
+    // Count occupied spots (Active employees who have an agreement assigned)
+    const activeOccupants = employees.filter(e => {
+      const status = e.status || e.employee_status || 'Active';
+      const hasAgreement = e.emplyee_allocated_agreement_id;
+      return status.toLowerCase() === 'active' && hasAgreement;
+    }).length;
 
-    // 5. Occupancy Rate Calculation
-    const residences = await Residence.find();
-    let totalCapacity = 0;
-    let totalOccupied = 0;
-
-    residences.forEach(res => {
-      const cap = parseInt(res.capacity || 0, 10);
-      const occ = parseInt(res.currentOccupancy || 0, 10);
-      totalCapacity += cap;
-      totalOccupied += occ;
-    });
+    // Count total capacity
+    const totalCapacity = residences.reduce((sum, res) => {
+      // Use 'capacity' if it exists, otherwise fallback to 'residence_house_count' or 0
+      // Adjust this field name based on your exact CSV header for capacity
+      const cap = parseInt(res.capacity || res.residence_house_count || 0, 10);
+      return sum + cap;
+    }, 0);
 
     const occupancyRate = totalCapacity > 0 
-      ? ((totalOccupied / totalCapacity) * 100).toFixed(1) 
+      ? ((activeOccupants / totalCapacity) * 100).toFixed(1) 
       : 0;
 
-    // 6. Monthly Rent Cost by Department (Aggregation)
-    // Joins Agreement -> Employee to group by department
-    const rentByDepartment = await Agreement.aggregate([
-      {
-        $lookup: {
-          from: 'employees', // Must match your MongoDB collection name (usually lowercase plural)
-          localField: 'employee',
-          foreignField: '_id',
-          as: 'employeeDetails'
-        }
-      },
-      {
-        $unwind: '$employeeDetails'
-      },
-      {
-        $group: {
-          _id: '$employeeDetails.department',
-          totalRent: { $sum: '$rentAmount' }
-        }
-      },
-      {
-        $sort: { totalRent: -1 } // Sort by highest rent first
-      }
-    ]);
+    // 5. Monthly Rent Cost by Department
+    const rentByDeptMap = {};
 
-    // Format graph data for frontend
-    const departmentLabels = rentByDepartment.map(item => item._id || 'Unknown');
-    const departmentData = rentByDepartment.map(item => item.totalRent);
+    employees.forEach(emp => {
+        // Only count Active employees for current monthly cost
+        const status = emp.status || emp.employee_status || 'Active';
+        if (status.toLowerCase() !== 'active') return;
+
+        const dept = emp.employee_department || 'Unknown';
+        const agreementId = emp.emplyee_allocated_agreement_id;
+
+        if (agreementId) {
+            // Find the agreement to get the rent amount
+            const agreement = agreements.find(a => a.agreement_id == agreementId);
+            if (agreement) {
+                const rent = parseFloat(agreement.agreement_monthly_rent_amount || 0);
+                if (!rentByDeptMap[dept]) rentByDeptMap[dept] = 0;
+                rentByDeptMap[dept] += rent;
+            }
+        }
+    });
+
+    const departmentLabels = Object.keys(rentByDeptMap);
+    const departmentData = Object.values(rentByDeptMap);
 
     res.json({
       totalAgreements,
@@ -99,7 +116,7 @@ router.get('/', async (req, res) => {
 
   } catch (err) {
     console.error('Analytics Error:', err);
-    res.status(500).json({ message: 'Server Error' });
+    res.status(500).json({ message: 'Server Error processing Excel data' });
   }
 });
 
