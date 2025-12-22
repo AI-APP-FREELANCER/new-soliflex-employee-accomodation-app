@@ -5,6 +5,35 @@ const excelReader = require('../data/excelReader');
 
 router.use(authenticateToken);
 
+// Helper: Parse various date formats (DD-MMM-YYYY, DD/MM/YYYY, YYYY-MM-DD)
+const parseDate = (dateStr) => {
+  if (!dateStr) return null;
+  
+  // Try standard Date parse first
+  let date = new Date(dateStr);
+  if (!isNaN(date.getTime())) return date;
+
+  // Handle DD-MMM-YYYY (e.g., 01-Jan-2024)
+  const parts = dateStr.split(/[-/]/);
+  if (parts.length === 3) {
+    // Check if second part is a month name (Jan, Feb, etc.)
+    const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    const monthIndex = monthNames.indexOf(parts[1].toLowerCase());
+    
+    if (monthIndex > -1) {
+      // Format: DD-MMM-YYYY
+      return new Date(parts[2], monthIndex, parts[0]);
+    } else if (parts[0].length === 4) {
+      // Format: YYYY-MM-DD
+      return new Date(parts[0], parts[1] - 1, parts[2]);
+    } else {
+      // Assume Format: DD/MM/YYYY
+      return new Date(parts[2], parts[1] - 1, parts[0]);
+    }
+  }
+  return null;
+};
+
 router.get('/', (req, res) => {
   try {
     // 1. Fetch Data from Excel/CSV
@@ -28,14 +57,15 @@ router.get('/', (req, res) => {
     let pastDueAgreements = 0;
 
     agreements.forEach(ag => {
-      // Check for valid end date
-      if (!ag.agreement_end_date) return;
-      
-      const endDate = new Date(ag.agreement_end_date);
-      // specific check for active status if needed, or count all physical copies
+      // Get Date String
+      const dateStr = ag.agreement_end_date || ag.EndDate; 
+      if (!dateStr) return;
+
+      const endDate = parseDate(dateStr);
+      if (!endDate) return; // Skip invalid dates
+
+      // Check Active Status (Case Insensitive)
       const status = ag.status || ag.agreement_status || 'Active'; 
-      
-      // We generally only track due dates for Active agreements
       if (status.toLowerCase() === 'active') {
         if (endDate < today) {
           pastDueAgreements++;
@@ -55,8 +85,7 @@ router.get('/', (req, res) => {
     });
 
     // 4. Occupancy Rate
-    // Formula: (Total Active Employees with Agreements / Total Bed Capacity) * 100
-    // Capacity comes from residence_house_count (assuming house count = capacity, or use specific capacity field if available)
+    // Formula: (Active Employees with Agreements / Total Capacity) * 100
     
     // Count occupied spots (Active employees who have an agreement assigned)
     const activeOccupants = employees.filter(e => {
@@ -67,10 +96,9 @@ router.get('/', (req, res) => {
 
     // Count total capacity
     const totalCapacity = residences.reduce((sum, res) => {
-      // Use 'capacity' if it exists, otherwise fallback to 'residence_house_count' or 0
-      // Adjust this field name based on your exact CSV header for capacity
+      // Use 'capacity' or fallback to 'residence_house_count'
       const cap = parseInt(res.capacity || res.residence_house_count || 0, 10);
-      return sum + cap;
+      return sum + (isNaN(cap) ? 0 : cap);
     }, 0);
 
     const occupancyRate = totalCapacity > 0 

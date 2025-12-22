@@ -90,7 +90,13 @@ const DashboardHome = () => {
     ],
   };
 
-  if (loading) return <div className="text-center mt-5"><div className="spinner-border text-primary" role="status"></div><p>Loading Dashboard...</p></div>;
+  if (loading) return (
+    <div className="d-flex justify-content-center align-items-center" style={{ height: '50vh' }}>
+      <div className="spinner-border text-primary" role="status">
+        <span className="sr-only">Loading Dashboard...</span>
+      </div>
+    </div>
+  );
 
   return (
     <div className="container-fluid">
@@ -187,19 +193,23 @@ const DashboardHome = () => {
               <h6 className="m-0 font-weight-bold text-primary">Monthly Rent Cost by Department</h6>
             </div>
             <div className="card-body">
+              {/* IMPORTANT: This div wrapper is required for ChartJS to size correctly */}
               <div className="chart-bar" style={{ position: 'relative', height: '320px', width: '100%' }}>
                 {stats.rentByDepartment?.labels.length > 0 ? (
                   <Bar 
                     data={barChartData} 
                     options={{ 
                       maintainAspectRatio: false,
+                      responsive: true,
                       plugins: {
                         legend: { display: false }
                       }
                     }} 
                   />
                 ) : (
-                  <div className="text-center pt-5 text-gray-500">No active rent data found</div>
+                  <div className="d-flex justify-content-center align-items-center h-100 text-gray-500">
+                    No active rent data found
+                  </div>
                 )}
               </div>
             </div>
@@ -213,11 +223,13 @@ const DashboardHome = () => {
               <h6 className="m-0 font-weight-bold text-primary">Occupancy Overview</h6>
             </div>
             <div className="card-body">
+              {/* IMPORTANT: This div wrapper is required for ChartJS to size correctly */}
               <div className="chart-pie pt-4 pb-2" style={{ position: 'relative', height: '250px' }}>
                 <Doughnut 
                   data={doughnutData} 
                   options={{ 
                     maintainAspectRatio: false, 
+                    responsive: true,
                     cutout: '70%',
                   }} 
                 />
