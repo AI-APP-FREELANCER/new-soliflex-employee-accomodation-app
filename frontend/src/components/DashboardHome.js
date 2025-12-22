@@ -1,338 +1,182 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Statistic, Spin, Typography, List, Tag, Button, Empty } from 'antd';
+import React, { useEffect, useState } from 'react';
 import { 
-  HomeOutlined, 
-  UserOutlined, 
-  TeamOutlined, 
-  BarChartOutlined,
-  AlertOutlined
-} from '@ant-design/icons';
-import { Pie, Column } from '@ant-design/plots';
-import { useNavigate } from 'react-router-dom';
-import { residenceAPI, employeeAPI, agreementAPI } from '../services/api';
-import dayjs from 'dayjs';
-import utc from 'dayjs/plugin/utc';
-import timezone from 'dayjs/plugin/timezone';
+  Chart as ChartJS, 
+  CategoryScale, 
+  LinearScale, 
+  BarElement, 
+  Title, 
+  Tooltip, 
+  Legend, 
+  ArcElement 
+} from 'chart.js';
+import { Bar, Doughnut } from 'react-chartjs-2';
+import api from '../services/api';
+import { useNavigate } from 'react-router-dom'; // Import useNavigate
 
-dayjs.extend(utc);
-dayjs.extend(timezone);
-
-const { Title, Text } = Typography;
+// Register ChartJS components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement
+);
 
 const DashboardHome = () => {
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate(); // Initialize hook
   const [stats, setStats] = useState({
-    totalResidences: 0,
-    activeAgreements: 0,
-    totalEmployees: 0,
-    totalCapacity: 0,
+    totalAgreements: 0,
+    dueAgreements: 0,
+    pastDueAgreements: 0,
+    inactiveEmployees: 0,
     occupancyRate: 0,
-    totalMonthlyRent: 0,
-    upcomingRenewals: 0,
-    pastDueRenewals: 0
+    rentByDepartment: { labels: [], data: [] }
   });
-
-  const [chartsData, setChartsData] = useState({
-    residenceStatus: [],
-    employeeDistribution: [],
-    costByDepartment: []
-  });
-
-  const [alerts, setAlerts] = useState([]);
-  const navigate = useNavigate();
-
-  // Helper to safely extract arrays from API responses
-  const extractArray = (response) => {
-    if (!response) return [];
-    if (Array.isArray(response)) return response;
-    if (response.data && Array.isArray(response.data)) return response.data;
-    if (response.data?.data && Array.isArray(response.data.data)) return response.data.data;
-    return [];
-  };
-
-  // Helper to normalize IDs (lowercase + trim) for matching
-  const normalizeId = (id) => String(id || '').trim().toLowerCase();
-
-  const fetchDashboardData = async () => {
-    setLoading(true);
-    try {
-      const [residencesRes, employeesRes, agreementsRes] = await Promise.all([
-        residenceAPI.getAll(),
-        employeeAPI.getAll(),
-        agreementAPI.getAll('all') // Fetch ALL to ensure correct counts
-      ]);
-
-      const residences = extractArray(residencesRes);
-      const employees = extractArray(employeesRes);
-      const agreements = extractArray(agreementsRes);
-
-      console.log('Dashboard Data Loaded:', { 
-        res: residences.length, 
-        emp: employees.length, 
-        agr: agreements.length 
-      });
-
-      calculateStats(residences, employees, agreements);
-      generateCharts(residences, employees, agreements);
-      generateAlerts(agreements);
-
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchDashboardData();
+    const fetchStats = async () => {
+      try {
+        const res = await api.get('/analytics');
+        setStats(res.data);
+      } catch (err) {
+        console.error('Error fetching analytics:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
   }, []);
 
-  const calculateStats = (residences, employees, agreements) => {
-    // Filter Active Agreements
-    const activeAgreements = agreements.filter(a => 
-      String(a.agreement_status || '').toLowerCase() === 'active'
-    );
-    
-    // Calculate Financials
-    const totalRent = activeAgreements.reduce((sum, a) => {
-      const amount = parseFloat(String(a.agreement_monthly_rent_amount || '0').replace(/[^\d.-]/g, ''));
-      return sum + (isNaN(amount) ? 0 : amount);
-    }, 0);
-
-    // Calculate Occupancy
-    const totalCapacity = residences.reduce((sum, r) => sum + (Number(r.residence_capacity) || 0), 0);
-    const totalOccupants = employees.filter(e => 
-      String(e.status || '').toLowerCase() === 'active'
-    ).length;
-    
-    // Calculate Renewal Alerts
-    const today = dayjs();
-    const ninetyDaysOut = today.add(90, 'day');
-    
-    let pastDue = 0;
-    let upcoming = 0;
-
-    activeAgreements.forEach(a => {
-      if (!a.agreement_renewal_due_date) return;
-      const due = dayjs(a.agreement_renewal_due_date);
-      if (due.isBefore(today, 'day')) pastDue++;
-      else if (due.isBefore(ninetyDaysOut, 'day')) upcoming++;
-    });
-
-    setStats({
-      totalResidences: residences.length,
-      activeAgreements: activeAgreements.length,
-      totalEmployees: employees.length,
-      totalCapacity,
-      occupancyRate: totalCapacity ? Math.round((totalOccupants / totalCapacity) * 100) : 0,
-      totalMonthlyRent: totalRent,
-      upcomingRenewals: upcoming,
-      pastDueRenewals: pastDue
-    });
+  // Navigation handlers
+  const goToAgreements = (filterType) => {
+    // Navigate to agreements tab, passing state so you can filter there if needed
+    navigate('/agreements', { state: { filter: filterType } });
   };
 
-  const generateCharts = (residences, employees, agreements) => {
-    // 1. Residence Status Chart
-    const statusCounts = {};
-    residences.forEach(r => {
-      const s = String(r.residence_status || 'Active'); 
-      statusCounts[s] = (statusCounts[s] || 0) + 1;
-    });
-    
-    const residenceStatusData = Object.keys(statusCounts).map(status => ({
-      type: status,
-      value: statusCounts[status]
-    })).filter(d => d.value > 0);
-
-    // 2. Cost by Department (Pro-Rata Logic)
-    const costMap = {};
-    const activeEmployees = employees.filter(e => String(e.status).toLowerCase() === 'active');
-    
-    const occupantsPerRes = {};
-    activeEmployees.forEach(emp => {
-      const rid = normalizeId(emp.residence_id || emp.allocated_residence_id);
-      if (rid) occupantsPerRes[rid] = (occupantsPerRes[rid] || 0) + 1;
-    });
-
-    activeEmployees.forEach(emp => {
-      const rid = normalizeId(emp.residence_id || emp.allocated_residence_id);
-      const dept = emp.department || 'Unassigned';
-      
-      const agreement = agreements.find(a => 
-        normalizeId(a.agreement_residence_id) === rid && 
-        String(a.agreement_status).toLowerCase() === 'active'
-      );
-
-      if (agreement && occupantsPerRes[rid] > 0) {
-        const rent = parseFloat(String(agreement.agreement_monthly_rent_amount || '0').replace(/[^\d.-]/g, ''));
-        const perHeadCost = rent / occupantsPerRes[rid];
-        costMap[dept] = (costMap[dept] || 0) + perHeadCost;
-      }
-    });
-
-    const costByDeptData = Object.keys(costMap).map(dept => ({
-      department: dept,
-      cost: Math.round(costMap[dept])
-    })).sort((a, b) => b.cost - a.cost).slice(0, 8); 
-
-    setChartsData({
-      residenceStatus: residenceStatusData,
-      costByDepartment: costByDeptData,
-      employeeDistribution: []
-    });
+  const goToEmployees = () => {
+     navigate('/employees', { state: { filter: 'inactive' } });
   };
 
-  const generateAlerts = (agreements) => {
-    const today = dayjs();
-    const newAlerts = [];
-    
-    agreements.forEach(a => {
-      if (String(a.agreement_status).toLowerCase() !== 'active') return;
-      if (!a.agreement_renewal_due_date) return;
-      
-      const due = dayjs(a.agreement_renewal_due_date);
-      if (due.isBefore(today, 'day')) {
-        newAlerts.push({
-          id: a.agreement_id,
-          message: `Agreement ${a.agreement_id} is PAST DUE (${due.format('DD MMM YYYY')})`,
-          type: 'error'
-        });
-      }
-    });
-    
-    setAlerts(newAlerts.slice(0, 5));
+  const barChartData = {
+    labels: stats.rentByDepartment?.labels || [],
+    datasets: [
+      {
+        label: 'Monthly Rent Cost (SAR)',
+        data: stats.rentByDepartment?.data || [],
+        backgroundColor: 'rgba(53, 162, 235, 0.5)',
+      },
+    ],
   };
+
+  const doughnutData = {
+    labels: ['Occupied', 'Vacant'],
+    datasets: [
+      {
+        data: [stats.occupancyRate, 100 - stats.occupancyRate],
+        backgroundColor: [
+          'rgba(75, 192, 192, 0.5)',
+          'rgba(255, 99, 132, 0.5)',
+        ],
+        borderColor: [
+          'rgba(75, 192, 192, 1)',
+          'rgba(255, 99, 132, 1)',
+        ],
+        borderWidth: 1,
+      },
+    ],
+  };
+
+  if (loading) return <div className="text-center mt-5">Loading Dashboard...</div>;
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Title level={2} style={{ marginBottom: 24 }}>Dashboard</Title>
+    <div className="container-fluid">
+      <h2 className="mb-4">Dashboard Overview</h2>
       
-      {loading ? <Spin size="large" style={{ display: 'block', margin: '100px auto' }} /> : (
-        <>
-          {/* Key Metrics Cards */}
-          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-            <Col xs={24} sm={12} md={6}>
-              <Card>
-                <Statistic 
-                  title="Total Properties" 
-                  value={stats.totalResidences} 
-                  prefix={<HomeOutlined />} 
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Card>
-                <Statistic 
-                  title="Active Employees" 
-                  value={stats.totalEmployees} 
-                  prefix={<TeamOutlined />} 
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Card>
-                <Statistic 
-                  title="Total Monthly Rent" 
-                  value={stats.totalMonthlyRent} 
-                  precision={0}
-                  prefix="₹" 
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Card>
-                <Statistic 
-                  title="Occupancy Rate" 
-                  value={stats.occupancyRate} 
-                  suffix="%" 
-                  prefix={<BarChartOutlined />}
-                  valueStyle={{ color: stats.occupancyRate > 90 ? '#cf1322' : '#3f8600' }}
-                />
-              </Card>
-            </Col>
-          </Row>
+      {/* Stats Cards Row */}
+      <div className="row mb-4">
+        {/* Occupancy Rate */}
+        <div className="col-md-3">
+          <div className="card text-white bg-info mb-3 h-100">
+            <div className="card-header">Occupancy Rate</div>
+            <div className="card-body">
+              <h3 className="card-title">{stats.occupancyRate}%</h3>
+              <p className="card-text">Total capacity utilization</p>
+            </div>
+          </div>
+        </div>
 
-          {/* Alerts & Pie Chart Row */}
-          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-            <Col xs={24} md={12}>
-              <Card title="Upcoming Renewals & Alerts" extra={<AlertOutlined style={{ color: '#faad14' }} />}>
-                <Row gutter={[16, 16]}>
-                  <Col span={12}>
-                     <Statistic 
-                       title="Due ≤ 90 Days" 
-                       value={stats.upcomingRenewals} 
-                       valueStyle={{ color: '#faad14', cursor: 'pointer' }}
-                       onClick={() => navigate('/agreements?filter=due90')}
-                     />
-                  </Col>
-                  <Col span={12}>
-                     <Statistic 
-                       title="Past Due" 
-                       value={stats.pastDueRenewals} 
-                       valueStyle={{ color: '#ff4d4f', cursor: 'pointer' }}
-                       onClick={() => navigate('/agreements?filter=pastDue')}
-                     />
-                  </Col>
-                </Row>
-                <List
-                  style={{ marginTop: 16 }}
-                  size="small"
-                  dataSource={alerts}
-                  renderItem={item => (
-                    <List.Item>
-                      <Text type={item.type === 'error' ? 'danger' : 'warning'}>
-                        {item.message}
-                      </Text>
-                    </List.Item>
-                  )}
-                />
-              </Card>
-            </Col>
+        {/* Agreements Due <= 90 Days */}
+        <div className="col-md-3" style={{ cursor: 'pointer' }} onClick={() => goToAgreements('due_soon')}>
+          <div className="card text-white bg-warning mb-3 h-100">
+            <div className="card-header">Due ≤ 90 Days</div>
+            <div className="card-body">
+              <h3 className="card-title">{stats.dueAgreements}</h3>
+              <p className="card-text">Click to view details</p>
+            </div>
+          </div>
+        </div>
 
-            <Col xs={24} md={12}>
-               <Card title="Property Status Distribution">
-                 {chartsData.residenceStatus.length > 0 ? (
-                   <Pie 
-                     data={chartsData.residenceStatus} 
-                     angleField="value" 
-                     colorField="type" 
-                     radius={0.8} 
-                     innerRadius={0.6}
-                     /* FIX: Simplified label to prevent crash */
-                     label={{ 
-                       text: 'value',
-                       style: { fontWeight: 'bold' }
-                     }}
-                     legend={{ position: 'bottom' }}
-                     height={250}
-                   />
-                 ) : <Empty description="No Data" />}
-               </Card>
-            </Col>
-          </Row>
+        {/* Past Due Agreements */}
+        <div className="col-md-3" style={{ cursor: 'pointer' }} onClick={() => goToAgreements('past_due')}>
+          <div className="card text-white bg-danger mb-3 h-100">
+            <div className="card-header">Past Due</div>
+            <div className="card-body">
+              <h3 className="card-title">{stats.pastDueAgreements}</h3>
+              <p className="card-text">Click to view details</p>
+            </div>
+          </div>
+        </div>
 
-          {/* Cost Bar Chart Row */}
-          <Row gutter={[16, 16]}>
-            <Col span={24}>
-              <Card title="Monthly Rent Cost by Department (Top 8)">
-                {chartsData.costByDepartment.length > 0 ? (
-                  <Column 
-                    data={chartsData.costByDepartment} 
-                    xField="department" 
-                    yField="cost" 
-                    color="#1890ff"
-                    /* FIX: Simplified label */
-                    label={{ 
-                      position: 'middle', 
-                      style: { fill: '#FFFFFF', opacity: 0.6 } 
-                    }}
-                  />
-                ) : <Empty description="No cost data available (Check Employee-Residence Links)" />}
-              </Card>
-            </Col>
-          </Row>
-        </>
-      )}
+         {/* Inactive Employees */}
+         <div className="col-md-3" style={{ cursor: 'pointer' }} onClick={goToEmployees}>
+          <div className="card text-white bg-secondary mb-3 h-100">
+            <div className="card-header">Inactive Employees</div>
+            <div className="card-body">
+              <h3 className="card-title">{stats.inactiveEmployees}</h3>
+              <p className="card-text">Total inactive staff</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Graphs Row */}
+      <div className="row">
+        {/* Rent by Department Bar Chart */}
+        <div className="col-md-8">
+          <div className="card shadow mb-4">
+            <div className="card-header py-3">
+              <h6 className="m-0 font-weight-bold text-primary">Monthly Rent Cost by Department</h6>
+            </div>
+            <div className="card-body">
+              {stats.rentByDepartment?.labels.length > 0 ? (
+                <Bar options={{ responsive: true }} data={barChartData} />
+              ) : (
+                <p className="text-center py-5">No rent data available to display graph.</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Occupancy Doughnut Chart */}
+        <div className="col-md-4">
+          <div className="card shadow mb-4">
+            <div className="card-header py-3">
+              <h6 className="m-0 font-weight-bold text-primary">Occupancy Overview</h6>
+            </div>
+            <div className="card-body">
+               <div style={{ maxHeight: '300px', display: 'flex', justifyContent: 'center' }}>
+                <Doughnut data={doughnutData} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Removed <RecentActivities /> and <AgreementsList /> as requested */}
     </div>
   );
 };
