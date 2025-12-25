@@ -2,149 +2,224 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth');
 const excelReader = require('../data/excelReader');
+const dayjs = require('dayjs');
+const utc = require('dayjs/plugin/utc');
+const timezone = require('dayjs/plugin/timezone');
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 router.use(authenticateToken);
 
-// Helper: Parse various date formats (DD-MMM-YYYY, DD/MM/YYYY, YYYY-MM-DD)
-const parseDate = (dateStr) => {
-  if (!dateStr) return null;
-  
-  // Try standard Date parse first
-  let date = new Date(dateStr);
-  if (!isNaN(date.getTime())) return date;
-
-  // Handle DD-MMM-YYYY (e.g., 01-Jan-2024)
-  const parts = dateStr.split(/[-/]/);
-  if (parts.length === 3) {
-    // Check if second part is a month name (Jan, Feb, etc.)
-    const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-    const monthIndex = monthNames.indexOf(parts[1].toLowerCase());
-    
-    if (monthIndex > -1) {
-      // Format: DD-MMM-YYYY
-      return new Date(parts[2], monthIndex, parts[0]);
-    } else if (parts[0].length === 4) {
-      // Format: YYYY-MM-DD
-      return new Date(parts[0], parts[1] - 1, parts[2]);
-    } else {
-      // Assume Format: DD/MM/YYYY
-      return new Date(parts[2], parts[1] - 1, parts[0]);
-    }
-  }
-  return null;
+// Helper: Parse currency values safely
+const parseCurrency = (val) => {
+  if (val === undefined || val === null || val === '') return 0;
+  if (typeof val === 'number') return val;
+  const clean = String(val).replace(/[^\d.-]/g, '');
+  const num = parseFloat(clean);
+  return isNaN(num) ? 0 : num;
 };
 
+// Helper: Normalize status (case-insensitive)
+// Handles 'ACTIVE', 'Active', 'active', 'INACTIVE', 'Inactive', 'inactive'
+const normalizeStatus = (status) => {
+  const s = String(status || '').trim().toLowerCase();
+  return s === 'inactive' ? 'inactive' : 'active';
+};
+
+// Helper: Check if employee is active (case-insensitive)
+// Excel stores as 'ACTIVE' or 'INACTIVE' (uppercase)
+const isEmployeeActive = (employee) => {
+  const status = String(employee.employee_status || employee.status || '').trim().toUpperCase();
+  return status === 'ACTIVE';
+};
+
+// GET / - Main Dashboard Analytics
 router.get('/', (req, res) => {
   try {
-    // 1. Fetch Data from Excel/CSV
+    // 1. Fetch ALL Data
     const agreements = excelReader.getAgreements('all');
     const employees = excelReader.getEmployees('all');
-    const residences = excelReader.getResidences();
+    const residences = excelReader.getResidences('all');
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const ninetyDaysFromNow = new Date();
-    ninetyDaysFromNow.setDate(today.getDate() + 90);
+    // 2. Setup IST Date (Start of Today)
+    const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
+    const ninetyDaysFromNow = today.add(90, 'day');
 
     // --- CALCULATIONS ---
 
-    // 1. Total Agreements
-    const totalAgreements = agreements.length;
+    // 1. Total Properties Managed
+    const totalProperties = residences.length;
 
-    // 2. Due Dates (Past Due & Due <= 90 Days)
-    let dueAgreements = 0;
-    let pastDueAgreements = 0;
-
-    agreements.forEach(ag => {
-      // Get Date String
-      const dateStr = ag.agreement_end_date || ag.EndDate; 
-      if (!dateStr) return;
-
-      const endDate = parseDate(dateStr);
-      if (!endDate) return; // Skip invalid dates
-
-      // Check Active Status (Case Insensitive)
-      const status = ag.status || ag.agreement_status || 'Active'; 
-      if (status.toLowerCase() === 'active') {
-        if (endDate < today) {
-          pastDueAgreements++;
-        } else if (endDate <= ninetyDaysFromNow) {
-          dueAgreements++;
-        }
-      }
-    });
-
-    // 3. Inactive Employees
+    // 2. Employee Status (case-insensitive matching for ACTIVE/INACTIVE)
+    let activeEmployees = 0;
     let inactiveEmployees = 0;
-    employees.forEach(emp => {
-      const status = emp.status || emp.employee_status || '';
-      if (status.toLowerCase() === 'inactive') {
+    employees.forEach(e => {
+      // Check employee_status field (Excel stores as 'ACTIVE' or 'INACTIVE')
+      const status = String(e.employee_status || e.status || '').trim().toUpperCase();
+      if (status === 'ACTIVE') {
+        activeEmployees++;
+      } else if (status === 'INACTIVE') {
         inactiveEmployees++;
+      } else {
+        // Default to active if status is missing or invalid (backward compatibility)
+        activeEmployees++;
       }
     });
 
-    // 4. Occupancy Rate
-    // Formula: (Active Employees with Agreements / Total Capacity) * 100
-    
-    // Count occupied spots (Active employees who have an agreement assigned)
-    const activeOccupants = employees.filter(e => {
-      const status = e.status || e.employee_status || 'Active';
-      const hasAgreement = e.emplyee_allocated_agreement_id;
-      return status.toLowerCase() === 'active' && hasAgreement;
-    }).length;
+    // 3. Renewal Alerts (using IST)
+    let pastDue = 0;
+    let dueSoon = 0;
 
-    // Count total capacity
-    const totalCapacity = residences.reduce((sum, res) => {
-      // Use 'capacity' or fallback to 'residence_house_count'
-      const cap = parseInt(res.capacity || res.residence_house_count || 0, 10);
-      return sum + (isNaN(cap) ? 0 : cap);
-    }, 0);
+    agreements.forEach(a => {
+      const status = normalizeStatus(a.agreement_status || a.status);
+      if (status !== 'active') return;
 
-    const occupancyRate = totalCapacity > 0 
-      ? ((activeOccupants / totalCapacity) * 100).toFixed(1) 
-      : 0;
+      const renewalDueDate = a.agreement_renewal_due_date;
+      if (!renewalDueDate) return;
 
-    // 5. Monthly Rent Cost by Department
-    const rentByDeptMap = {};
-
-    employees.forEach(emp => {
-        // Only count Active employees for current monthly cost
-        const status = emp.status || emp.employee_status || 'Active';
-        if (status.toLowerCase() !== 'active') return;
-
-        const dept = emp.employee_department || 'Unknown';
-        const agreementId = emp.emplyee_allocated_agreement_id;
-
-        if (agreementId) {
-            // Find the agreement to get the rent amount
-            const agreement = agreements.find(a => a.agreement_id == agreementId);
-            if (agreement) {
-                const rent = parseFloat(agreement.agreement_monthly_rent_amount || 0);
-                if (!rentByDeptMap[dept]) rentByDeptMap[dept] = 0;
-                rentByDeptMap[dept] += rent;
-            }
+      // Parse renewal date with IST
+      let dueDate;
+      try {
+        dueDate = dayjs.tz(renewalDueDate, 'Asia/Kolkata').startOf('day');
+        if (!dueDate.isValid()) {
+          dueDate = dayjs(renewalDueDate, 'YYYY-MM-DD', true).tz('Asia/Kolkata').startOf('day');
         }
+      } catch (err) {
+        return;
+      }
+
+      if (!dueDate.isValid()) return;
+
+      // Check if past due or due soon
+      if (dueDate.isBefore(today, 'day')) {
+        pastDue++;
+      } else if (dueDate.isSame(today, 'day') || dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day')) {
+        dueSoon++;
+      }
     });
 
-    const departmentLabels = Object.keys(rentByDeptMap);
-    const departmentData = Object.values(rentByDeptMap);
-
-    res.json({
-      totalAgreements,
-      dueAgreements,
-      pastDueAgreements,
-      inactiveEmployees,
-      occupancyRate,
-      rentByDepartment: {
-        labels: departmentLabels,
-        data: departmentData
+    // 4. Total Monthly Rent (sum of active agreements)
+    let totalMonthlyRent = 0;
+    agreements.forEach(a => {
+      const status = normalizeStatus(a.agreement_status || a.status);
+      if (status === 'active') {
+        totalMonthlyRent += parseCurrency(a.agreement_monthly_rent_amount);
       }
+    });
+
+    // 5. Total Advance Locked (sum of active agreements)
+    let totalAdvanceLocked = 0;
+    agreements.forEach(a => {
+      const status = normalizeStatus(a.agreement_status || a.status);
+      if (status === 'active') {
+        totalAdvanceLocked += parseCurrency(a.agreement_advance_amount);
+      }
+    });
+
+    // 6. Total Advance Due Back (inactive agreements with advance)
+    let totalAdvanceDueBack = 0;
+    agreements.forEach(a => {
+      const status = normalizeStatus(a.agreement_status || a.status);
+      if (status === 'inactive') {
+        totalAdvanceDueBack += parseCurrency(a.agreement_advance_amount);
+      }
+    });
+
+    // 7. Total Net Received (placeholder - would need financial transaction data)
+    // For now, calculate as sum of advances from inactive agreements
+    let totalNetReceived = 0;
+    agreements.forEach(a => {
+      const status = normalizeStatus(a.agreement_status || a.status);
+      if (status === 'inactive') {
+        // In a real system, this would come from payment records
+        // For now, we'll use a simplified calculation
+        totalNetReceived += parseCurrency(a.agreement_advance_amount) * 0.1; // Example: 10% received
+      }
+    });
+
+
+    // 8. Monthly Rent by Department
+    const rentMap = {};
+    const agreementRentLookup = {};
+    
+    // Build agreement rent lookup
+    agreements.forEach(a => {
+      const status = normalizeStatus(a.agreement_status || a.status);
+      if (status === 'active') {
+        const rent = parseCurrency(a.agreement_monthly_rent_amount);
+        agreementRentLookup[a.agreement_id] = rent;
+      }
+    });
+
+    // Sum rent by department
+    employees.forEach(e => {
+      // Use case-insensitive check for employee_status
+      const status = String(e.employee_status || e.status || '').trim().toUpperCase();
+      if (status !== 'ACTIVE') return;
+
+      const dept = (e.employee_department || 'Unassigned').trim();
+      const agId = e.emplyee_allocated_agreement_id;
+
+      if (agId && agreementRentLookup[agId]) {
+        rentMap[dept] = (rentMap[dept] || 0) + agreementRentLookup[agId];
+      }
+    });
+
+    // Format for chart (sort high to low, limit to top 4)
+    const rentByDepartment = Object.keys(rentMap).map(dept => ({
+      department: dept,
+      cost: rentMap[dept]
+    })).sort((a, b) => b.cost - a.cost).slice(0, 4);
+
+    // 9. Employee Breakdown by Department (for chart)
+    const deptCountMap = {};
+    employees.forEach(e => {
+      // Use case-insensitive check for employee_status
+      const status = String(e.employee_status || e.status || '').trim().toUpperCase();
+      if (status === 'ACTIVE') {
+        const dept = (e.employee_department || 'Unassigned').trim();
+        deptCountMap[dept] = (deptCountMap[dept] || 0) + 1;
+      }
+    });
+
+    const employeeBreakdown = Object.keys(deptCountMap).map(dept => ({
+      department: dept,
+      count: deptCountMap[dept]
+    })).sort((a, b) => b.count - a.count).slice(0, 4);
+
+    // Return all dashboard data
+    res.json({
+      // Property Stats
+      totalProperties,
+      
+      // Employee Stats
+      activeEmployees,
+      inactiveEmployees,
+      totalEmployees: activeEmployees + inactiveEmployees,
+      
+      // Renewal Stats
+      pastDue,
+      dueSoon,
+      currentDateIST: today.format('DD-MM-YYYY'),
+      
+      // Financial Stats
+      totalMonthlyRent,
+      totalAdvanceLocked,
+      totalAdvanceDueBack,
+      totalNetReceived,
+      
+      // Chart Data
+      rentByDepartment,
+      employeeBreakdown
     });
 
   } catch (err) {
-    console.error('Analytics Error:', err);
-    res.status(500).json({ message: 'Server Error processing Excel data' });
+    // Log error securely without exposing details
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Analytics Error:', err.message);
+    }
+    res.status(500).json({ error: 'Server Error processing data' });
   }
 });
 

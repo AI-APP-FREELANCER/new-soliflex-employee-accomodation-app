@@ -5,11 +5,38 @@ const excelReader = require('../data/excelReader');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
 router.use(authenticateToken);
+
+// --- PDF ATTACHMENT CONFIGURATION ---
+// Ensure attachments folder exists in project root
+const ATTACHMENTS_DIR = path.join(__dirname, '../../attachments');
+if (!fs.existsSync(ATTACHMENTS_DIR)) {
+  fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, ATTACHMENTS_DIR),
+  filename: (req, file, cb) => cb(null, `${req.params.id}.pdf`) // Rename to ID.pdf
+});
+
+const upload = multer({ 
+  storage: storage, 
+  limits: { fileSize: 3 * 1024 * 1024 }, // 3MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF files are allowed'), false);
+    }
+  }
+});
 
 // --- HELPER: Fix NaN Issues ---
 const parseCurrency = (val) => {
@@ -92,25 +119,36 @@ router.get('/', (req, res) => {
     // 2. Enrich & Normalize
     agreements = agreements.map(enrichAgreement);
 
-    // 3. Apply Status Filter
+    // 3. Add has_attachment flag for each agreement
+    agreements = agreements.map(agreement => {
+      const filePath = path.join(ATTACHMENTS_DIR, `${agreement.agreement_id}.pdf`);
+      return {
+        ...agreement,
+        has_attachment: fs.existsSync(filePath)
+      };
+    });
+
+    // 4. Apply Status Filter
     if (req.query.status && req.query.status.toLowerCase() !== 'all') {
       const target = req.query.status.trim().toLowerCase();
       agreements = agreements.filter(a => a.agreement_status.toLowerCase() === target);
     }
     
-    // 4. Apply Renewal Filter
+    // 5. Apply Renewal Filter
     if (req.query.renewal_status) {
       agreements = agreements.filter(a => a.computed_renewal_status === req.query.renewal_status);
     }
 
-    // 5. Apply Residence Filter
+    // 6. Apply Residence Filter
     if (req.query.residence_id) {
       agreements = agreements.filter(a => a.agreement_residence_id === req.query.residence_id);
     }
 
     res.json(agreements);
   } catch (error) {
-    console.error('Error fetching agreements:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error fetching agreements:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -123,7 +161,80 @@ router.get('/active', (req, res) => {
     const activeOnly = enriched.filter(a => a.agreement_status === 'Active');
     res.json(activeOnly);
   } catch (error) {
-    console.error('Error fetching active agreements:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error fetching active agreements:', error.message);
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// --- PDF ATTACHMENT ROUTES (Must be defined before GET /:id to avoid route conflicts) ---
+
+// GET /:id/attachment - Stream PDF attachment
+router.get('/:id/attachment', (req, res) => {
+  try {
+    const filePath = path.join(ATTACHMENTS_DIR, `${req.params.id}.pdf`);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${req.params.id}.pdf"`);
+    
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error streaming attachment:', error.message);
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /:id/attachment - Upload PDF attachment
+router.post('/:id/attachment', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    
+    res.json({ 
+      message: 'File uploaded successfully',
+      filename: req.file.filename 
+    });
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error uploading attachment:', error.message);
+    }
+    
+    if (error.message === 'Only PDF files are allowed') {
+      return res.status(400).json({ error: error.message });
+    }
+    
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'File size exceeds 3MB limit' });
+    }
+    
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /:id/attachment - Delete PDF attachment
+router.delete('/:id/attachment', (req, res) => {
+  try {
+    const filePath = path.join(ATTACHMENTS_DIR, `${req.params.id}.pdf`);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+    
+    fs.unlinkSync(filePath);
+    res.json({ message: 'Attachment deleted successfully' });
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error deleting attachment:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -136,9 +247,15 @@ router.get('/:id', (req, res) => {
     
     if (!agreement) return res.status(404).json({ error: 'Agreement not found' });
     
-    res.json(enrichAgreement(agreement));
+    const enriched = enrichAgreement(agreement);
+    const filePath = path.join(ATTACHMENTS_DIR, `${enriched.agreement_id}.pdf`);
+    enriched.has_attachment = fs.existsSync(filePath);
+    
+    res.json(enriched);
   } catch (error) {
-    console.error('Error fetching agreement:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error fetching agreement:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -152,7 +269,9 @@ router.get('/residence/:residenceId', (req, res) => {
     );
     res.json(residenceAgreements.map(enrichAgreement));
   } catch (error) {
-    console.error('Error fetching agreements by residence:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error fetching agreements by residence:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -177,7 +296,9 @@ router.post('/', (req, res) => {
     const newAgreement = excelReader.addAgreement(data);
     res.status(201).json(newAgreement);
   } catch (error) {
-    console.error('Error creating agreement:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error creating agreement:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -194,7 +315,9 @@ router.put('/:id', (req, res) => {
     
     res.json(updatedAgreement);
   } catch (error) {
-    console.error('Error updating agreement:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error updating agreement:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -210,7 +333,80 @@ router.patch('/:id/deactivate', (req, res) => {
     
     res.json(deactivatedAgreement);
   } catch (error) {
-    console.error('Error deactivating agreement:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error deactivating agreement:', error.message);
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// --- PDF ATTACHMENT ROUTES ---
+
+// POST /:id/attachment - Upload PDF attachment
+router.post('/:id/attachment', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    
+    res.json({ 
+      message: 'File uploaded successfully',
+      filename: req.file.filename 
+    });
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error uploading attachment:', error.message);
+    }
+    
+    if (error.message === 'Only PDF files are allowed') {
+      return res.status(400).json({ error: error.message });
+    }
+    
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'File size exceeds 3MB limit' });
+    }
+    
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /:id/attachment - Stream PDF attachment
+router.get('/:id/attachment', (req, res) => {
+  try {
+    const filePath = path.join(ATTACHMENTS_DIR, `${req.params.id}.pdf`);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename=' + path.basename(filePath));
+    
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error streaming attachment:', error.message);
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /:id/attachment - Delete PDF attachment
+router.delete('/:id/attachment', (req, res) => {
+  try {
+    const filePath = path.join(ATTACHMENTS_DIR, `${req.params.id}.pdf`);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Attachment not found' });
+    }
+    
+    fs.unlinkSync(filePath);
+    res.json({ message: 'Attachment deleted successfully' });
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error deleting attachment:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });

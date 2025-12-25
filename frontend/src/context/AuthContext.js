@@ -47,7 +47,7 @@ export const AuthProvider = ({ children }) => {
         logout();
       }
     } catch (error) {
-      console.error('Token verification failed:', error);
+      // Token verification failed - silently logout
       logout();
     } finally {
       setLoading(false);
@@ -73,7 +73,7 @@ export const AuthProvider = ({ children }) => {
 
       return { success: true };
     } catch (error) {
-      console.error('Login failed:', error);
+      // Login failed - return error message without exposing details
       return {
         success: false,
         error: error.response?.data?.error || 'Login failed',

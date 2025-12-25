@@ -127,7 +127,7 @@ nano .env
 
 Add these lines:
 ```env
-PORT=5000
+PORT=3000
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
 NODE_ENV=production
 ```
@@ -144,8 +144,8 @@ nano .env
 
 Add this line (if your API is on different domain):
 ```env
-REACT_APP_API_URL=http://your-vm-ip:5000
-# or: REACT_APP_API_URL=http://your-domain.com:5000
+REACT_APP_API_URL=http://your-vm-ip:3000
+# or: REACT_APP_API_URL=http://your-domain.com:3000
 ```
 
 ---
@@ -183,7 +183,7 @@ module.exports = {
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
-        PORT: 5000
+        PORT: 3000
       },
       error_file: './logs/backend-error.log',
       out_file: './logs/backend-out.log',
@@ -264,7 +264,7 @@ pm2 logs sol-emp-backend
 pm2 logs sol-emp-frontend
 
 # Check if ports are listening
-sudo netstat -tulpn | grep :5000
+sudo netstat -tulpn | grep :3000
 sudo netstat -tulpn | grep :3000
 ```
 
@@ -290,7 +290,7 @@ pm2 startup
 ```bash
 # Allow ports 3000 and 5000
 sudo ufw allow 3000/tcp
-sudo ufw allow 5000/tcp
+sudo ufw allow 3000/tcp
 
 # If using SSH, make sure it's allowed
 sudo ufw allow 22/tcp
@@ -308,7 +308,7 @@ sudo ufw status
 
 ### Test Backend:
 ```bash
-curl http://localhost:5000/api/health
+curl http://localhost:3000/api/health
 # Should return: {"status":"OK","message":"Soliflex Quarters Manager API is running"}
 ```
 
@@ -400,13 +400,13 @@ pm2 logs sol-emp-frontend --err
 
 ### Check if ports are in use:
 ```bash
-sudo lsof -i :5000
+sudo lsof -i :3000
 sudo lsof -i :3000
 ```
 
 ### Kill process on port (if needed):
 ```bash
-sudo kill -9 $(sudo lsof -t -i:5000)
+sudo kill -9 $(sudo lsof -t -i:3000)
 sudo kill -9 $(sudo lsof -t -i:3000)
 ```
 
@@ -447,7 +447,7 @@ cd ../frontend && npm install
 # 6. Create backend .env
 cd ../backend
 nano .env
-# Add: PORT=5000, JWT_SECRET=your-secret, NODE_ENV=production
+# Add: PORT=3000, JWT_SECRET=your-secret, NODE_ENV=production
 
 # 7. Build frontend
 cd ../frontend
@@ -471,11 +471,11 @@ pm2 startup
 
 # 12. Configure firewall
 sudo ufw allow 3000/tcp
-sudo ufw allow 5000/tcp
+sudo ufw allow 3000/tcp
 sudo ufw enable
 
 # 13. Test
-curl http://localhost:5000/api/health
+curl http://localhost:3000/api/health
 # Visit: http://your-vm-ip:3000
 ```
 

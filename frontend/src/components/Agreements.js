@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Table, Card, Button, Input, Tag, Space, Select, DatePicker, message, Modal, Form, Row, Col, Typography, Empty } from 'antd';
-import { SearchOutlined, PlusOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Table, Card, Button, Input, Tag, Space, Select, DatePicker, message, Modal, Form, Row, Col, Typography, Empty, Popconfirm } from 'antd';
+import { SearchOutlined, PlusOutlined, EditOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
 import { agreementAPI, residenceAPI } from '../services/api';
+import apiClient from '../services/api';
 import dayjs from 'dayjs';
 import { formatDateForDisplay } from '../utils/dateUtils';
-import { useLocation } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -22,15 +23,41 @@ const Agreements = () => {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingAgreement, setEditingAgreement] = useState(null);
   const [form] = Form.useForm();
-  const location = useLocation();
+  
+  // PDF Attachment states
+  const [pdfUrl, setPdfUrl] = useState(null);
+  const [isPdfModalVisible, setIsPdfModalVisible] = useState(false);
+  const [pdfTitle, setPdfTitle] = useState('View PDF Attachment');
+  const fileInputRef = useRef(null);
+  const currentUploadId = useRef(null);
+  
+  // Use modern useSearchParams hook for reliable URL parameter reading
+  const [searchParams] = useSearchParams();
+
+  // Handle URL filters - clear conflicting filters and apply the specific filter
+  useEffect(() => {
+    const filterParam = searchParams.get('filter');
+    
+    if (filterParam) {
+      // Clear potentially conflicting filters to ensure clean slate
+      setSearchText('');
+      setResidenceFilter(null);
+      
+      // Ensure we are looking at 'Active' agreements (since Past Due/Due Soon are only relevant for Active)
+      setStatusFilter('Active');
+
+      // Map the URL param to the exact Select Option values
+      if (filterParam === 'pastDue') {
+        setRenewalFilter('Past Due');
+      } else if (filterParam === 'due90') {
+        setRenewalFilter('Due Soon');
+      }
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     fetchResidences();
-    const searchParams = new URLSearchParams(location.search);
-    const filterType = searchParams.get('filter');
-    if (filterType === 'pastDue') setRenewalFilter('Past Due');
-    if (filterType === 'due90') setRenewalFilter('Due Soon');
-  }, [location]);
+  }, []);
 
   useEffect(() => {
     fetchAgreements();
@@ -42,7 +69,7 @@ const Agreements = () => {
       const data = Array.isArray(response.data) ? response.data : (response.data?.data || []);
       setResidences(data);
     } catch (error) {
-      console.error('Failed to fetch residences');
+      // Failed to fetch residences - handled silently
     }
   };
 
@@ -148,6 +175,43 @@ const Agreements = () => {
       },
     },
     {
+      title: 'Attachment',
+      key: 'attachment',
+      render: (_, record) => (
+        <Space>
+          {record.has_attachment ? (
+            <>
+              <Button 
+                icon={<EyeOutlined />} 
+                onClick={() => handleViewPdf(record.agreement_id)}
+                title="View PDF"
+              />
+              <Popconfirm 
+                title="Delete attachment?"
+                description="Are you sure you want to delete this PDF attachment?"
+                onConfirm={() => handleDeletePdf(record.agreement_id)}
+                okText="Yes"
+                cancelText="No"
+              >
+                <Button 
+                  icon={<DeleteOutlined />} 
+                  danger
+                  title="Delete PDF"
+                />
+              </Popconfirm>
+            </>
+          ) : (
+            <Button 
+              icon={<UploadOutlined />} 
+              onClick={() => triggerUpload(record.agreement_id)}
+            >
+              Upload
+            </Button>
+          )}
+        </Space>
+      ),
+    },
+    {
       title: 'Actions',
       key: 'actions',
       render: (_, record) => (
@@ -190,6 +254,86 @@ const Agreements = () => {
     }
   };
 
+  // PDF Attachment Handlers
+  const triggerUpload = (agreementId) => {
+    currentUploadId.current = agreementId;
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (file.type !== 'application/pdf') {
+      message.error('Only PDF files are allowed');
+      event.target.value = ''; // Reset input
+      return;
+    }
+
+    // Validate file size (3MB = 3 * 1024 * 1024 bytes)
+    const maxSize = 3 * 1024 * 1024;
+    if (file.size > maxSize) {
+      message.error('File size exceeds 3MB limit');
+      event.target.value = ''; // Reset input
+      return;
+    }
+
+    const agreementId = currentUploadId.current;
+    if (!agreementId) return;
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      await agreementAPI.uploadAttachment(agreementId, formData);
+      message.success('PDF uploaded successfully');
+      fetchAgreements(); // Refresh to show the new attachment
+    } catch (error) {
+      const errorMessage = error.response?.data?.error || 'Failed to upload PDF';
+      message.error(errorMessage);
+    } finally {
+      event.target.value = ''; // Reset input
+      currentUploadId.current = null;
+    }
+  };
+
+  const handleViewPdf = async (agreementId) => {
+    const hide = message.loading('Loading PDF...', 0);
+    try {
+      // 1. Request the file as a 'blob' (binary data)
+      const response = await apiClient.get(`/agreement/${agreementId}/attachment`, {
+        responseType: 'blob' 
+      });
+
+      // 2. Create a secure local URL for the blob
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const localPdfUrl = URL.createObjectURL(blob);
+
+      // 3. Set this local URL for the iframe
+      setPdfUrl(localPdfUrl);
+      setPdfTitle(`Agreement Attachment: ${agreementId}`);
+      setIsPdfModalVisible(true);
+    } catch (error) {
+      // Silent error handling for production
+      const errorMessage = error.response?.data?.error || 'Failed to load PDF. It may not exist.';
+      message.error(errorMessage);
+    } finally {
+      hide();
+    }
+  };
+
+  const handleDeletePdf = async (agreementId) => {
+    try {
+      await agreementAPI.deleteAttachment(agreementId);
+      message.success('PDF deleted successfully');
+      fetchAgreements(); // Refresh to update the UI
+    } catch (error) {
+      const errorMessage = error.response?.data?.error || 'Failed to delete PDF';
+      message.error(errorMessage);
+    }
+  };
+
   return (
     <div style={{ padding: '24px' }}>
       <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -228,7 +372,15 @@ const Agreements = () => {
             <Select
               style={{ width: '100%' }}
               value={renewalFilter}
-              onChange={setRenewalFilter}
+              onChange={(value) => {
+                setRenewalFilter(value);
+                // Clear URL filter param when filter is manually cleared
+                if (!value && searchParams.get('filter')) {
+                  const newSearchParams = new URLSearchParams(searchParams);
+                  newSearchParams.delete('filter');
+                  window.history.replaceState({}, '', `${window.location.pathname}${newSearchParams.toString() ? `?${newSearchParams.toString()}` : ''}`);
+                }
+              }}
               placeholder="Renewal Urgency"
               allowClear
             >
@@ -254,6 +406,15 @@ const Agreements = () => {
         </Row>
       </Card>
 
+      {/* Hidden file input for PDF upload */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="application/pdf"
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+      />
+
       <Table
         columns={columns}
         dataSource={filteredAgreements}
@@ -262,6 +423,37 @@ const Agreements = () => {
         pagination={{ pageSize: 10 }}
         locale={{ emptyText: <Empty description="No agreements found" /> }}
       />
+
+      {/* PDF View Modal */}
+      <Modal
+        title={pdfTitle}
+        open={isPdfModalVisible}
+        onCancel={() => {
+          // Clean up the object URL to prevent memory leaks
+          if (pdfUrl) {
+            URL.revokeObjectURL(pdfUrl);
+          }
+          setIsPdfModalVisible(false);
+          setPdfUrl(null);
+          setPdfTitle('View PDF Attachment');
+        }}
+        footer={null}
+        width={900}
+        style={{ top: 20 }}
+        bodyStyle={{ height: '80vh', padding: 0 }}
+      >
+        {pdfUrl && (
+          <iframe
+            src={pdfUrl}
+            style={{
+              width: '100%',
+              height: '100%',
+              border: 'none'
+            }}
+            title="PDF Viewer"
+          />
+        )}
+      </Modal>
 
       <Modal
         title={editingAgreement ? "Edit Agreement" : "New Agreement"}

@@ -5,7 +5,9 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+// Default to 3000 (matches VM configuration)
+// For local development, ensure backend runs on 3000
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
@@ -31,7 +33,9 @@ app.get('/api/health', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Backend API accessible at http://0.0.0.0:${PORT}`);
+  // Only log in development or if explicitly enabled
+  if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SERVER_LOGS === 'true') {
+    console.log(`Server is running on port ${PORT}`);
+  }
 });
 

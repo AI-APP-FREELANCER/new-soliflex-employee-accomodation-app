@@ -43,7 +43,7 @@ const HRReporting = () => {
       setRenewalAlerts(alertsRes.data);
       setAgreements(agreementsRes.data);
     } catch (error) {
-      console.error('Failed to fetch reporting data:', error);
+      // Failed to fetch reporting data - handled by message.error
     } finally {
       setLoading(false);
     }
@@ -242,7 +242,7 @@ const HRReporting = () => {
       pdf.save('HR_Reporting.pdf');
       message.success({ content: 'PDF exported successfully', key: 'pdf' });
     } catch (error) {
-      console.error('Error exporting PDF:', error);
+      // Error exporting PDF - handled by message.error
       message.error({ content: 'Failed to export PDF', key: 'pdf' });
     }
   };
@@ -284,7 +284,7 @@ const HRReporting = () => {
       XLSX.writeFile(wb, 'HR_Reporting.xlsx');
       message.success('Excel file exported successfully');
     } catch (error) {
-      console.error('Error exporting Excel:', error);
+      // Error exporting Excel - handled by message.error
       message.error('Failed to export Excel file');
     }
   };

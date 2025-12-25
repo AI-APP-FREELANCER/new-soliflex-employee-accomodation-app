@@ -59,7 +59,9 @@ router.get('/', (req, res) => {
 
     res.json(employees);
   } catch (error) {
-    console.error('Error fetching employees:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error fetching employees:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -74,7 +76,9 @@ router.get('/:id', (req, res) => {
     
     res.json(toFrontend(employee));
   } catch (error) {
-    console.error('Error fetching employee:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error fetching employee:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -86,7 +90,9 @@ router.get('/residence/:residenceId', (req, res) => {
     const residents = employees.filter(e => e.residence_id === req.params.residenceId);
     res.json(residents.map(toFrontend));
   } catch (error) {
-    console.error('Error fetching employees by residence:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error fetching employees by residence:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -101,8 +107,10 @@ router.post('/', (req, res) => {
     // Return Frontend format
     res.status(201).json(toFrontend(newEmployee));
   } catch (error) {
-    console.error('Error creating employee:', error);
-    res.status(500).json({ error: error.message });
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error creating employee:', error.message);
+    }
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -118,8 +126,10 @@ router.put('/:id', (req, res) => {
     // Return Frontend format
     res.json(toFrontend(updated));
   } catch (error) {
-    console.error('Error updating employee:', error);
-    res.status(500).json({ error: error.message });
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error updating employee:', error.message);
+    }
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -130,7 +140,9 @@ router.delete('/:id', (req, res) => {
     if (!deleted) return res.status(404).json({ error: 'Employee not found' });
     res.json({ message: 'Employee deleted successfully' });
   } catch (error) {
-    console.error('Error deleting employee:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error deleting employee:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });

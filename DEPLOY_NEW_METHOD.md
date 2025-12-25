@@ -52,7 +52,7 @@ module.exports = {
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
-        PORT: 5000
+        PORT: 3000
       },
       error_file: './logs/backend-error.log',
       out_file: './logs/backend-out.log',
@@ -121,7 +121,7 @@ pm2 startup
 
 ```bash
 # Test backend
-curl http://localhost:5000/api/health
+curl http://localhost:3000/api/health
 
 # Test frontend
 curl http://localhost:3000
@@ -181,7 +181,7 @@ curl http://localhost:3000
 # Should return HTML
 
 # Test backend
-curl http://localhost:5000/api/health
+curl http://localhost:3000/api/health
 # Should return JSON
 ```
 

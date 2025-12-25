@@ -43,7 +43,10 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Login error:', error);
+    // Log error securely without exposing details
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Login error:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -65,7 +68,10 @@ router.get('/verify', async (req, res) => {
       res.json({ valid: true, user: decoded });
     });
   } catch (error) {
-    console.error('Verify token error:', error);
+    // Log error securely without exposing details
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Verify token error:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });

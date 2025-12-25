@@ -9,7 +9,7 @@ import {
   LogoutOutlined,
   DashboardOutlined,
 } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Residences from './Residences';
 import Agreements from './Agreements';
@@ -24,10 +24,27 @@ const Dashboard = () => {
   const responsive = useResponsive();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMenuVisible, setMobileMenuVisible] = useState(false);
-  const [selectedKey, setSelectedKey] = useState('dashboard');
   const [agreementsFilter, setAgreementsFilter] = useState(null);
   const { logout, user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Sync selectedKey with current route
+  const getSelectedKeyFromPath = (pathname) => {
+    if (pathname.startsWith('/agreements')) return 'agreements';
+    if (pathname.startsWith('/employees')) return 'employees';
+    if (pathname.startsWith('/residences')) return 'residences';
+    if (pathname.startsWith('/analytics')) return 'analytics';
+    return 'dashboard';
+  };
+
+  const [selectedKey, setSelectedKey] = useState(() => getSelectedKeyFromPath(location.pathname));
+
+  // Update selectedKey when route changes
+  useEffect(() => {
+    const key = getSelectedKeyFromPath(location.pathname);
+    setSelectedKey(key);
+  }, [location.pathname]);
 
   // Auto-collapse sidebar on mobile
   useEffect(() => {
@@ -70,12 +87,25 @@ const Dashboard = () => {
     if (responsive.isMobileOrTablet) {
       setMobileMenuVisible(false);
     }
+    // Navigate to the route so URL matches
+    navigate('/agreements' + (filter ? `?filter=${filter}` : ''));
   };
 
   const handleMenuClick = ({ key }) => {
     setSelectedKey(key);
     if (responsive.isMobileOrTablet) {
       setMobileMenuVisible(false);
+    }
+    // Navigate to the corresponding route
+    const routeMap = {
+      'dashboard': '/dashboard',
+      'residences': '/residences',
+      'agreements': '/agreements',
+      'employees': '/employees',
+      'analytics': '/analytics',
+    };
+    if (routeMap[key]) {
+      navigate(routeMap[key]);
     }
   };
 
@@ -84,11 +114,11 @@ const Dashboard = () => {
       case 'residences':
         return <Residences />;
       case 'agreements':
-        return <Agreements initialFilter={agreementsFilter} onFilterClear={() => setAgreementsFilter(null)} />;
+        return <Agreements />;
       case 'employees':
         return <Employees />;
       default:
-        return <DashboardHome onNavigateToAgreements={handleNavigateToAgreements} />;
+        return <DashboardHome />;
     }
   };
 

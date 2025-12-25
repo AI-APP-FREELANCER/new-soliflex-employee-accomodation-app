@@ -108,14 +108,11 @@ export const formatDateForDisplay = (date) => {
   
   const dateObj = robustDateParser(date);
   if (!dateObj || !dateObj.isValid()) {
-    // If parsing failed, log for debugging
-    console.warn('Invalid date format detected:', date, typeof date);
     return 'N/A';
   }
   
   // Validate date range
   if (!validateDateRange(dateObj)) {
-    console.warn('Date out of valid range (2023-2100):', date, 'parsed as:', dateObj.format('YYYY-MM-DD'));
     return 'N/A';
   }
   
@@ -133,13 +130,11 @@ export const formatDateForAPI = (date) => {
   
   const dateObj = robustDateParser(date);
   if (!dateObj || !dateObj.isValid()) {
-    console.warn('Failed to format date for API:', date, typeof date);
     return null;
   }
   
   // Validate date range
   if (!validateDateRange(dateObj)) {
-    console.warn('Date for API out of valid range (2023-2100):', date);
     return null;
   }
   
@@ -157,13 +152,11 @@ export const parseDateFromAPI = (dateInput) => {
   
   const dateObj = robustDateParser(dateInput);
   if (!dateObj || !dateObj.isValid()) {
-    console.warn('Failed to parse date from API:', dateInput, typeof dateInput);
     return null;
   }
   
   // Validate date range
   if (!validateDateRange(dateObj)) {
-    console.warn('Date from API out of valid range (2023-2100):', dateInput, 'parsed as:', dateObj.format('YYYY-MM-DD'));
     return null;
   }
   
@@ -184,7 +177,6 @@ export const formatDateForInput = (date) => {
   
   // Validate date range
   if (!validateDateRange(dateObj)) {
-    console.warn('Date for input out of valid range (2023-2100):', date);
     return null;
   }
   

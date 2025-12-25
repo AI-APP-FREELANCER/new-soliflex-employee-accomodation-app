@@ -3,7 +3,7 @@
 ## Understanding the Setup
 
 Your app runs on the VM using **PM2** with two processes:
-- `sol-emp-backend` - Backend API (port 5000)
+- `sol-emp-backend` - Backend API (port 3000)
 - `sol-emp-frontend` - Frontend server (port 3600) - **serves built files from `frontend/build/`**
 
 **IMPORTANT**: The frontend serves **compiled/built** files, not source code. You MUST rebuild the frontend after code changes!
@@ -145,8 +145,8 @@ pm2 restart sol-emp-frontend
 
 ### Verify ports are correct:
 ```bash
-# Check what's on port 5000 (backend)
-sudo lsof -i :5000
+# Check what's on port 3000 (backend)
+sudo lsof -i :3000
 
 # Check what's on port 3600 (frontend)
 sudo lsof -i :3600

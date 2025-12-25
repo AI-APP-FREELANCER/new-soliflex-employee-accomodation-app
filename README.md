@@ -58,7 +58,7 @@ npm install
 
 3. Create a `.env` file in the backend directory:
 ```env
-PORT=5000
+PORT=3000
 JWT_SECRET=your-secret-key-change-in-production
 NODE_ENV=development
 ```
@@ -72,7 +72,7 @@ npm start
 npm run dev
 ```
 
-The backend API will be available at `http://localhost:5000`
+The backend API will be available at `http://localhost:3000`
 
 ### Frontend Setup
 

@@ -42,5 +42,5 @@ src/
 
 ## API Proxy
 
-The frontend is configured to proxy API requests to `http://localhost:5000` (see `package.json` proxy setting).
+The frontend is configured to proxy API requests to `http://localhost:3000` (see `setupProxy.js`).
 

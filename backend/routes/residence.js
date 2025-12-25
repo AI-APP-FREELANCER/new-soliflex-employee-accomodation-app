@@ -13,7 +13,9 @@ router.get('/', (req, res) => {
     const residences = excelReader.getResidences(statusFilter);
     res.json(residences);
   } catch (error) {
-    console.error('Error fetching residences:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error fetching residences:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -30,7 +32,9 @@ router.get('/:id', (req, res) => {
     
     res.json(residence);
   } catch (error) {
-    console.error('Error fetching residence:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error fetching residence:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -60,7 +64,9 @@ router.post('/', (req, res) => {
     const newResidence = excelReader.addResidence(data);
     res.status(201).json(newResidence);
   } catch (error) {
-    console.error('Error creating residence:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error creating residence:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -82,7 +88,9 @@ router.put('/:id', (req, res) => {
     
     res.json(updatedResidence);
   } catch (error) {
-    console.error('Error updating residence:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error updating residence:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -101,7 +109,9 @@ router.patch('/:id/deactivate', (req, res) => {
     
     res.json(deactivatedResidence);
   } catch (error) {
-    console.error('Error deactivating residence:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error deactivating residence:', error.message);
+    }
     res.status(500).json({ error: 'Internal server error' });
   }
 });

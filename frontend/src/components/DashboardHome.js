@@ -1,251 +1,286 @@
-import React, { useEffect, useState } from 'react';
-import { 
-  Chart as ChartJS, 
-  CategoryScale, 
-  LinearScale, 
-  BarElement, 
-  Title, 
-  Tooltip, 
-  Legend, 
-  ArcElement 
-} from 'chart.js';
-import { Bar, Doughnut } from 'react-chartjs-2';
-import api from '../services/api';
+import React, { useState, useEffect } from 'react';
+import { Card, Row, Col, Statistic, Spin, Typography, Empty } from 'antd';
+import { Column } from '@ant-design/charts'; 
 import { useNavigate } from 'react-router-dom';
+import api from '../services/api';
+import {
+  HomeOutlined,
+  AlertOutlined,
+  UserOutlined,
+  UserDeleteOutlined,
+  DollarOutlined,
+  WalletOutlined,
+  BankOutlined
+} from '@ant-design/icons';
 
-// Register ChartJS components
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  ArcElement
-);
+const { Title, Text } = Typography;
 
 const DashboardHome = () => {
   const navigate = useNavigate();
-  const [stats, setStats] = useState({
-    totalAgreements: 0,
-    dueAgreements: 0,
-    pastDueAgreements: 0,
-    inactiveEmployees: 0,
-    occupancyRate: 0,
-    rentByDepartment: { labels: [], data: [] }
-  });
   const [loading, setLoading] = useState(true);
+  const [data, setData] = useState({
+    // Property Stats
+    totalProperties: 0,
+    
+    // Employee Stats
+    activeEmployees: 0,
+    inactiveEmployees: 0,
+    totalEmployees: 0,
+    
+    // Renewal Stats
+    pastDue: 0,
+    dueSoon: 0,
+    currentDateIST: '',
+    
+    // Financial Stats
+    totalMonthlyRent: 0,
+    totalAdvanceLocked: 0,
+    totalAdvanceDueBack: 0,
+    totalNetReceived: 0,
+    
+    // Chart Data
+    rentByDepartment: [],
+    employeeBreakdown: []
+  });
 
   useEffect(() => {
-    const fetchStats = async () => {
+    const fetchData = async () => {
       try {
-        const res = await api.get('/analytics');
-        setStats(res.data || {});
-      } catch (err) {
-        console.error('Error fetching analytics:', err);
+        const response = await api.get('/analytics');
+        setData(response.data || {});
+      } catch (error) {
+        console.error("Dashboard fetch error:", error);
       } finally {
         setLoading(false);
       }
     };
-
-    fetchStats();
+    fetchData();
   }, []);
 
-  const goToAgreements = (filterType) => {
-    navigate('/agreements', { state: { filter: filterType } });
+  // Format currency for display
+  const formatCurrency = (value) => {
+    return `₹${Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
-  const goToEmployees = () => {
-     navigate('/employees', { state: { filter: 'Inactive' } });
-  };
-
-  // Prepare Graph Data
-  const barChartData = {
-    labels: stats.rentByDepartment?.labels || [],
-    datasets: [
-      {
-        label: 'Monthly Rent Cost (SAR)',
-        data: stats.rentByDepartment?.data || [],
-        backgroundColor: 'rgba(53, 162, 235, 0.7)',
-        borderRadius: 4,
+  // Chart Configurations
+  
+  // Bar Chart: Rent by Department
+  const rentColumnConfig = {
+    data: (data.rentByDepartment || []).slice(0, 4),
+    xField: 'department',
+    yField: 'cost',
+    // Force Y-axis to start at 0 so bars don't "float"
+    yAxis: {
+      min: 0,
+    },
+    label: {
+      // Place labels on top for clarity
+      position: 'top',
+      content: (item) => {
+        return formatCurrency(item.cost);
       },
-    ],
-  };
-
-  const doughnutData = {
-    labels: ['Occupied', 'Vacant'],
-    datasets: [
-      {
-        data: [stats.occupancyRate || 0, 100 - (stats.occupancyRate || 0)],
-        backgroundColor: [
-          'rgba(75, 192, 192, 0.6)',
-          'rgba(255, 99, 132, 0.6)',
-        ],
-        borderColor: [
-          'rgba(75, 192, 192, 1)',
-          'rgba(255, 99, 132, 1)',
-        ],
-        borderWidth: 1,
+      style: {
+        fontSize: 12,
+        fill: '#000000',
+        opacity: 0.8,
       },
-    ],
+    },
+    meta: {
+      department: { alias: 'Department' },
+      cost: { alias: 'Monthly Rent (₹)' },
+    },
+    color: '#1890ff',
   };
 
-  if (loading) return (
-    <div className="d-flex justify-content-center align-items-center" style={{ height: '50vh' }}>
-      <div className="spinner-border text-primary" role="status">
-        <span className="sr-only">Loading Dashboard...</span>
-      </div>
-    </div>
-  );
+  if (loading) return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
 
   return (
-    <div className="container-fluid">
-      <div className="d-sm-flex align-items-center justify-content-between mb-4">
-        <h1 className="h3 mb-0 text-gray-800">Dashboard</h1>
-      </div>
-      
-      {/* Stats Cards Row */}
-      <div className="row mb-4">
-        {/* Occupancy Rate */}
-        <div className="col-xl-3 col-md-6 mb-4">
-          <div className="card border-left-info shadow h-100 py-2">
-            <div className="card-body">
-              <div className="row no-gutters align-items-center">
-                <div className="col mr-2">
-                  <div className="text-xs font-weight-bold text-info text-uppercase mb-1">Occupancy Rate</div>
-                  <div className="row no-gutters align-items-center">
-                    <div className="col-auto">
-                      <div className="h5 mb-0 mr-3 font-weight-bold text-gray-800">{stats.occupancyRate}%</div>
-                    </div>
-                    <div className="col">
-                      <div className="progress progress-sm mr-2">
-                        <div className="progress-bar bg-info" role="progressbar" style={{ width: `${stats.occupancyRate}%` }} aria-valuenow={stats.occupancyRate} aria-valuemin="0" aria-valuemax="100"></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="col-auto">
-                  <i className="fas fa-clipboard-list fa-2x text-gray-300"></i>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+    <div style={{ padding: '24px' }}>
+      <Title level={2} style={{ marginBottom: '24px' }}>Dashboard Overview</Title>
 
-        {/* Due <= 90 Days */}
-        <div className="col-xl-3 col-md-6 mb-4" style={{ cursor: 'pointer' }} onClick={() => goToAgreements('due_soon')}>
-          <div className="card border-left-warning shadow h-100 py-2">
-            <div className="card-body">
-              <div className="row no-gutters align-items-center">
-                <div className="col mr-2">
-                  <div className="text-xs font-weight-bold text-warning text-uppercase mb-1">Due in ≤ 90 Days</div>
-                  <div className="h5 mb-0 font-weight-bold text-gray-800">{stats.dueAgreements}</div>
-                </div>
-                <div className="col-auto">
-                  <i className="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* First Row: Key Metrics */}
+      <Row gutter={[16, 16]}>
+        {/* Total Properties Managed */}
+        <Col xs={24} sm={12} md={8} lg={6}>
+          <Card style={{ height: '100%' }}>
+            <Statistic
+              title="Total Properties Managed"
+              value={data.totalProperties || 0}
+              prefix={<HomeOutlined />}
+              valueStyle={{ color: '#1890ff' }}
+            />
+          </Card>
+        </Col>
 
-        {/* Past Due */}
-        <div className="col-xl-3 col-md-6 mb-4" style={{ cursor: 'pointer' }} onClick={() => goToAgreements('past_due')}>
-          <div className="card border-left-danger shadow h-100 py-2">
-            <div className="card-body">
-              <div className="row no-gutters align-items-center">
-                <div className="col mr-2">
-                  <div className="text-xs font-weight-bold text-danger text-uppercase mb-1">Past Due</div>
-                  <div className="h5 mb-0 font-weight-bold text-gray-800">{stats.pastDueAgreements}</div>
-                </div>
-                <div className="col-auto">
-                  <i className="fas fa-calendar-times fa-2x text-gray-300"></i>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Active Employees */}
+        <Col xs={24} sm={12} md={8} lg={6}>
+          <Card style={{ height: '100%' }}>
+            <Statistic
+              title="Active Employees"
+              value={data.activeEmployees || 0}
+              prefix={<UserOutlined />}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
 
-         {/* Inactive Employees */}
-         <div className="col-xl-3 col-md-6 mb-4" style={{ cursor: 'pointer' }} onClick={goToEmployees}>
-          <div className="card border-left-secondary shadow h-100 py-2">
-            <div className="card-body">
-              <div className="row no-gutters align-items-center">
-                <div className="col mr-2">
-                  <div className="text-xs font-weight-bold text-secondary text-uppercase mb-1">Inactive Employees</div>
-                  <div className="h5 mb-0 font-weight-bold text-gray-800">{stats.inactiveEmployees}</div>
-                </div>
-                <div className="col-auto">
-                  <i className="fas fa-user-slash fa-2x text-gray-300"></i>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+        {/* Inactive Employees */}
+        <Col xs={24} sm={12} md={8} lg={6}>
+          <Card style={{ height: '100%' }}>
+            <Statistic
+              title="Inactive Employees"
+              value={data.inactiveEmployees || 0}
+              prefix={<UserDeleteOutlined />}
+              valueStyle={{ color: '#ff4d4f' }}
+            />
+          </Card>
+        </Col>
 
-      {/* Graphs Row */}
-      <div className="row">
-        {/* Rent by Department Bar Chart */}
-        <div className="col-xl-8 col-lg-7">
-          <div className="card shadow mb-4">
-            <div className="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-              <h6 className="m-0 font-weight-bold text-primary">Monthly Rent Cost by Department</h6>
-            </div>
-            <div className="card-body">
-              {/* IMPORTANT: This div wrapper is required for ChartJS to size correctly */}
-              <div className="chart-bar" style={{ position: 'relative', height: '320px', width: '100%' }}>
-                {stats.rentByDepartment?.labels.length > 0 ? (
-                  <Bar 
-                    data={barChartData} 
-                    options={{ 
-                      maintainAspectRatio: false,
-                      responsive: true,
-                      plugins: {
-                        legend: { display: false }
-                      }
-                    }} 
-                  />
-                ) : (
-                  <div className="d-flex justify-content-center align-items-center h-100 text-gray-500">
-                    No active rent data found
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Total Monthly Rent */}
+        <Col xs={24} sm={12} md={8} lg={6}>
+          <Card style={{ height: '100%' }}>
+            <Statistic
+              title="Total Monthly Rent"
+              value={data.totalMonthlyRent || 0}
+              prefix={<DollarOutlined />}
+              precision={2}
+              formatter={(value) => formatCurrency(value)}
+              valueStyle={{ color: '#1890ff' }}
+            />
+          </Card>
+        </Col>
+      </Row>
 
-        {/* Occupancy Doughnut Chart */}
-        <div className="col-xl-4 col-lg-5">
-          <div className="card shadow mb-4">
-            <div className="card-header py-3 d-flex flex-row align-items-center justify-content-between">
-              <h6 className="m-0 font-weight-bold text-primary">Occupancy Overview</h6>
+      {/* Second Row: Financial Metrics */}
+      <Row gutter={[16, 16]} style={{ marginTop: '16px' }}>
+        {/* Total Advance Locked */}
+        <Col xs={24} sm={12} md={8} lg={6}>
+          <Card style={{ height: '100%' }}>
+            <Statistic
+              title="Total Advance Locked"
+              value={data.totalAdvanceLocked || 0}
+              prefix={<WalletOutlined />}
+              precision={2}
+              formatter={(value) => formatCurrency(value)}
+              valueStyle={{ color: '#722ed1' }}
+            />
+          </Card>
+        </Col>
+
+        {/* Total Advance Due Back */}
+        <Col xs={24} sm={12} md={8} lg={6}>
+          <Card style={{ height: '100%' }}>
+            <Statistic
+              title="Total Advance Due Back"
+              value={data.totalAdvanceDueBack || 0}
+              prefix={<WalletOutlined />}
+              precision={2}
+              formatter={(value) => formatCurrency(value)}
+              valueStyle={{ color: '#fa8c16' }}
+            />
+          </Card>
+        </Col>
+
+        {/* Total Net Received */}
+        <Col xs={24} sm={12} md={8} lg={6}>
+          <Card style={{ height: '100%' }}>
+            <Statistic
+              title="Total Net Received"
+              value={data.totalNetReceived || 0}
+              prefix={<DollarOutlined />}
+              precision={2}
+              formatter={(value) => formatCurrency(value)}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Third Row: Renewal Alerts */}
+      <Row gutter={[16, 16]} style={{ marginTop: '16px' }}>
+        {/* Due ≤ 90 Days (Clickable) */}
+        <Col xs={24} sm={12} md={8} lg={6}>
+          <Card 
+            hoverable 
+            style={{ height: '100%', cursor: 'pointer' }}
+            onClick={() => navigate('/agreements?filter=due90')}
+          >
+            <Statistic
+              title="Due ≤ 90 Days"
+              value={data.dueSoon || 0}
+              valueStyle={{ color: '#faad14' }}
+              prefix={<AlertOutlined />}
+            />
+            <div style={{ marginTop: 8 }}>
+              <Text type="secondary">Click to view agreements</Text>
             </div>
-            <div className="card-body">
-              {/* IMPORTANT: This div wrapper is required for ChartJS to size correctly */}
-              <div className="chart-pie pt-4 pb-2" style={{ position: 'relative', height: '250px' }}>
-                <Doughnut 
-                  data={doughnutData} 
-                  options={{ 
-                    maintainAspectRatio: false, 
-                    responsive: true,
-                    cutout: '70%',
-                  }} 
-                />
-              </div>
-              <div className="mt-4 text-center small">
-                <span className="mr-2">
-                  <i className="fas fa-circle text-info"></i> Occupied
-                </span>
-                <span className="mr-2">
-                  <i className="fas fa-circle text-danger"></i> Vacant
-                </span>
-              </div>
+          </Card>
+        </Col>
+
+        {/* Past Due (Clickable) */}
+        <Col xs={24} sm={12} md={8} lg={6}>
+          <Card 
+            hoverable
+            style={{ height: '100%', cursor: 'pointer' }}
+            onClick={() => navigate('/agreements?filter=pastDue')}
+          >
+            <Statistic
+              title="Past Due"
+              value={data.pastDue || 0}
+              valueStyle={{ color: '#ff4d4f' }}
+              prefix={<AlertOutlined />}
+            />
+            <div style={{ marginTop: 8 }}>
+              <Text type="secondary">Click to view agreements</Text>
             </div>
-          </div>
-        </div>
-      </div>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Charts Row */}
+      <Row gutter={[16, 16]} style={{ marginTop: '24px' }}>
+        {/* Rent by Department */}
+        <Col xs={24} lg={12}>
+          <Card title={<><BankOutlined /> Monthly Rent Cost by Department</>} >
+            {data.rentByDepartment && data.rentByDepartment.length > 0 ? (
+              <Column {...rentColumnConfig} style={{ height: 350 }} />
+            ) : (
+              <Empty description="No Rent Data Available" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            )}
+          </Card>
+        </Col>
+
+        {/* Employee Breakdown by Department */}
+        <Col xs={24} lg={12}>
+          <Card title={<><UserOutlined /> Employee Breakdown by Department</>} >
+            {data.employeeBreakdown && data.employeeBreakdown.length > 0 ? (
+              <Column 
+                data={(data.employeeBreakdown || []).slice(0, 4)}
+                xField="department"
+                yField="count"
+                yAxis={{ min: 0 }}
+                label={{
+                  position: 'top',
+                  content: (item) => item.count.toString(),
+                  style: {
+                    fontSize: 12,
+                    fill: '#000000',
+                    opacity: 0.8,
+                  },
+                }}
+                meta={{
+                  department: { alias: 'Department' },
+                  count: { alias: 'Employee Count' },
+                }}
+                color="#52c41a"
+                style={{ height: 350 }}
+              />
+            ) : (
+              <Empty description="No Employee Data Available" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            )}
+          </Card>
+        </Col>
+      </Row>
     </div>
   );
 };

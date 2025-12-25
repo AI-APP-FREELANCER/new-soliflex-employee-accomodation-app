@@ -37,7 +37,7 @@ const Login = () => {
 
   return (
     <div className="login-container">
-      <Card className="login-card" bordered={false}>
+      <Card className="login-card">
         <h1 className="login-title">Soliflex Quarters Manager</h1>
         <Form
           name="login"

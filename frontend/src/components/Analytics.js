@@ -48,8 +48,6 @@ const Analytics = () => {
   const yearlyTrendData = [];
   
   if (financialSummary) {
-    console.log('Financial Summary for Yearly Trend:', financialSummary);
-    
     // Add previous year (2023) actual spend
     const year2023Value = parseFloat(financialSummary.year2023) || 0;
     if (year2023Value > 0) {
@@ -80,8 +78,6 @@ const Analytics = () => {
       });
     }
   }
-  
-  console.log('Yearly Trend Data:', yearlyTrendData);
 
   useEffect(() => {
     fetchAllData();
@@ -113,7 +109,6 @@ const Analytics = () => {
       // Get last 12 months of data (filter by current date and ensure valid numbers)
       const today = dayjs();
       const monthlyData = Array.isArray(monthlyRes.data) ? monthlyRes.data : [];
-      console.log('Monthly Spend Raw Data:', monthlyData);
       
       const last12MonthsData = monthlyData
         .map((item) => {
@@ -135,7 +130,6 @@ const Analytics = () => {
         .sort((a, b) => a.period.localeCompare(b.period))
         .slice(-12);
       
-      console.log('Monthly Spend Filtered Data (Last 12 months):', last12MonthsData);
       setMonthlySpend(last12MonthsData);
       
       setEmployeeBreakdown(employeeRes.data);
@@ -169,16 +163,12 @@ const Analytics = () => {
       setAgreements(agreementsRes.data);
     } catch (error) {
       message.error('Failed to fetch analytics data');
-      console.error(error);
     } finally {
       setLoading(false);
     }
   };
 
   // Chart 1: Bar Chart - Monthly Rent Spend (Last 12 months) - Refined Background
-  // Debug: Log data structure
-  console.log('Monthly Spend Chart Data:', monthlySpend);
-  
   const monthlySpendConfig = {
     data: Array.isArray(monthlySpend) && monthlySpend.length > 0
       ? monthlySpend.filter(item => item && item.amount > 0)
@@ -380,7 +370,6 @@ const Analytics = () => {
     return isValidYear && hasValidValue;
   });
   
-  console.log('Filtered Yearly Trend Data:', filteredYearlyData);
   
   const yearlyTrendConfig = {
     data: filteredYearlyData,
@@ -568,7 +557,7 @@ const Analytics = () => {
       message.success({ content: 'PDF exported successfully!', key: 'pdf' });
     } catch (error) {
       message.error({ content: 'Failed to export PDF', key: 'pdf' });
-      console.error(error);
+      // Error handled by message.error above
     }
   };
 
@@ -643,7 +632,7 @@ const Analytics = () => {
       message.success({ content: 'Excel exported successfully!', key: 'excel' });
     } catch (error) {
       message.error({ content: 'Failed to export Excel', key: 'excel' });
-      console.error(error);
+      // Error handled by message.error above
     }
   };
 

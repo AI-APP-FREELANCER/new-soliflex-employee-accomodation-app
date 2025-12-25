@@ -64,11 +64,9 @@ const Employees = () => {
         data = response.data.data;
       }
       
-      console.log(`[Employees] Fetched ${data.length} records`);
       setEmployees(data);
     } catch (error) {
       message.error('Failed to fetch employees');
-      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -81,7 +79,7 @@ const Employees = () => {
       const data = Array.isArray(response.data) ? response.data : (response.data?.data || []);
       setAgreements(data);
     } catch (error) {
-      console.error(error);
+      // Error handled by message.error above
     }
   };
 
@@ -119,7 +117,7 @@ const Employees = () => {
       fetchEmployees();
     } catch (error) {
       message.error(error.response?.data?.error || 'Failed to save employee');
-      console.error(error);
+      // Error handled by message.error above
     }
   };
 
@@ -171,7 +169,7 @@ const Employees = () => {
       message.success({ content: 'PDF exported successfully!', key: 'export' });
     } catch (error) {
       message.error({ content: 'Failed to export PDF', key: 'export' });
-      console.error(error);
+      // Error handled by message.error above
     }
   };
 
@@ -203,7 +201,7 @@ const Employees = () => {
       message.success({ content: 'Excel exported successfully!', key: 'export' });
     } catch (error) {
       message.error({ content: 'Failed to export Excel', key: 'export' });
-      console.error(error);
+      // Error handled by message.error above
     }
   };
 

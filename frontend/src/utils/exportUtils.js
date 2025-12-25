@@ -45,7 +45,7 @@ export const exportToPDF = async (element, filename, options = {}) => {
     pdf.save(filename || `export_${dayjs().format('YYYY-MM-DD')}.pdf`);
     return true;
   } catch (error) {
-    console.error('Error exporting to PDF:', error);
+    // Error exporting to PDF - rethrow for caller to handle
     throw error;
   }
 };
@@ -107,7 +107,7 @@ export const exportChartsToPDF = async (elements, filename) => {
     pdf.save(filename || `export_${dayjs().format('YYYY-MM-DD')}.pdf`);
     return true;
   } catch (error) {
-    console.error('Error exporting charts to PDF:', error);
+    // Error exporting charts to PDF - rethrow for caller to handle
     throw error;
   }
 };
@@ -132,7 +132,7 @@ export const exportTableToExcel = (data, sheetName = 'Sheet1', filename) => {
     XLSX.writeFile(wb, exportFilename);
     return true;
   } catch (error) {
-    console.error('Error exporting to Excel:', error);
+    // Error exporting to Excel - rethrow for caller to handle
     throw error;
   }
 };

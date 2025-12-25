@@ -9,7 +9,7 @@ npm install
 
 2. Create `.env` file:
 ```env
-PORT=5000
+PORT=3000
 JWT_SECRET=your-secret-key-change-in-production
 NODE_ENV=development
 ```

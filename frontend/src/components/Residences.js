@@ -62,7 +62,7 @@ const Residences = () => {
       setResidences(response.data);
     } catch (error) {
       message.error('Failed to fetch residences');
-      console.error(error);
+      // Error handled by message.error above
     } finally {
       setLoading(false);
     }
@@ -90,7 +90,7 @@ const Residences = () => {
       setEmployees(allEmployees);
     } catch (error) {
       message.error('Failed to fetch related data');
-      console.error(error);
+      // Error handled by message.error above
     }
   };
 
@@ -126,7 +126,7 @@ const Residences = () => {
       fetchResidences();
     } catch (error) {
       message.error(error.response?.data?.error || 'Failed to save residence');
-      console.error(error);
+      // Error handled by message.error above
     }
   };
 
@@ -176,7 +176,7 @@ const Residences = () => {
       message.success({ content: 'PDF exported successfully!', key: 'export' });
     } catch (error) {
       message.error({ content: 'Failed to export PDF', key: 'export' });
-      console.error(error);
+      // Error handled by message.error above
     }
   };
 
@@ -203,7 +203,7 @@ const Residences = () => {
       message.success({ content: 'Excel exported successfully!', key: 'export' });
     } catch (error) {
       message.error({ content: 'Failed to export Excel', key: 'export' });
-      console.error(error);
+      // Error handled by message.error above
     }
   };
 

@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Dynamically determine API URL based on current host
-// Use relative paths when behind nginx proxy, or explicit URL for direct access
+// Backend runs on port 3000, Frontend on port 3600
 const getApiBaseUrl = () => {
   // Check if we have an explicit API URL in environment
   if (process.env.REACT_APP_API_URL) {
@@ -16,8 +16,9 @@ const getApiBaseUrl = () => {
     return '/api';
   }
   
-  // Development fallback
-  return 'http://localhost:5000/api';
+  // Development: Explicitly point to backend on port 3000
+  // Backend is on port 3000, frontend dev server is on port 3600
+  return 'http://localhost:3000/api';
 };
 
 const API_BASE_URL = getApiBaseUrl();
@@ -75,6 +76,15 @@ export const agreementAPI = {
   create: (data) => api.post('/agreement', data),
   update: (id, data) => api.put(`/agreement/${id}`, data),
   deactivate: (id, data) => api.patch(`/agreement/${id}/deactivate`, data),
+  // Attachment methods
+  uploadAttachment: (id, formData) => api.post(`/agreement/${id}/attachment`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  deleteAttachment: (id) => api.delete(`/agreement/${id}/attachment`),
+  getAttachmentUrl: (id) => {
+    const baseUrl = api.defaults.baseURL || '';
+    return `${baseUrl}/agreement/${id}/attachment`;
+  },
 };
 
 // Employee APIs
