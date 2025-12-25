@@ -1,92 +1,133 @@
-# Port Configuration Guide
+# Port Configuration Summary
 
-## VM/Production Configuration
+## Current Configuration Status
 
-- **Backend**: Port `3000`
-- **Frontend**: Port `3600`
+### ✅ Backend Port: 3000
+- **File**: `backend/server.js`
+  - Default: `const PORT = process.env.PORT || 3000;`
+  - ✅ Correct
 
-## Local Development Configuration
+- **File**: `ecosystem.config.js` (PM2 config)
+  - **FIXED**: Changed from `PORT: 5000` to `PORT: 3000`
+  - ✅ Now correct
 
-To avoid port conflicts during local development:
+- **File**: `backend/.env` (if exists)
+  - Should contain: `PORT=3000`
+  - ✅ Should be set to 3000
 
-- **Backend**: Port `3000` (matches VM)
-- **Frontend Dev Server**: Port `3001` (to avoid conflict with backend on 3000)
+### ✅ Frontend Port: 3600
+- **File**: `frontend/package.json`
+  - Script: `"start": "set PORT=3600 && react-scripts start"`
+  - ✅ Correct
 
-### Setup for Local Development
+- **File**: `frontend/server.js` (Production server)
+  - Default: `const PORT = process.env.PORT || 3600;`
+  - ✅ Correct
 
-1. **Backend** - Ensure `.env` file in `backend/` directory has:
-   ```env
-   PORT=3000
-   JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-   NODE_ENV=development
-   ```
+- **File**: `ecosystem.config.js` (PM2 config)
+  - Environment: `PORT: 3600`
+  - ✅ Correct
 
-2. **Frontend** - Create `.env` file in `frontend/` directory with:
-   ```env
-   PORT=3001
-   ```
+### ✅ API Connection Configuration
 
-3. **Start Services**:
-   ```bash
-   # Terminal 1 - Backend (MUST START FIRST)
-   cd backend
-   npm start
-   # Backend will run on http://localhost:3000
-   # You should see: "Server is running on port 3000"
-   
-   # Terminal 2 - Frontend
-   cd frontend
-   npm start
-   # Frontend will run on http://localhost:3001
-   # API calls will be proxied to backend on port 3000
-   ```
+- **File**: `frontend/src/services/api.js`
+  - **Development**: `http://localhost:3000/api` ✅
+  - **Production**: `/api` (relative path, proxied by frontend server) ✅
 
-### How It Works
+- **File**: `frontend/server.js`
+  - Proxies `/api` requests to: `http://localhost:3000` ✅
+  - Backend port variable: `BACKEND_PORT = 3000` ✅
 
-- Frontend dev server runs on port 3001
-- All `/api/*` requests are proxied to `http://localhost:3000` (backend)
-- This matches the VM configuration where backend is on 3000 and frontend is on 3600
+---
 
-### Proxy Configuration
+## Port Configuration Details
 
-The `frontend/src/setupProxy.js` file is configured to proxy all `/api/*` requests to:
+### Development Environment (Local)
+
+| Service | Port | Configuration File | Status |
+|---------|------|-------------------|--------|
+| Backend | 3000 | `backend/server.js` | ✅ Correct |
+| Frontend | 3600 | `frontend/package.json` | ✅ Correct |
+| API Calls | `http://localhost:3000/api` | `frontend/src/services/api.js` | ✅ Correct |
+
+### Production Environment (VM)
+
+| Service | Port | Configuration File | Status |
+|---------|------|-------------------|--------|
+| Backend | 3000 | `ecosystem.config.js` | ✅ **FIXED** (was 5000) |
+| Frontend | 3600 | `ecosystem.config.js` | ✅ Correct |
+| API Calls | `/api` (proxied) | `frontend/src/services/api.js` | ✅ Correct |
+| Proxy Target | `http://localhost:3000` | `frontend/server.js` | ✅ Correct |
+
+---
+
+## What Was Fixed
+
+### Issue Found:
+- `ecosystem.config.js` had `PORT: 5000` for backend
+- This would cause backend to run on port 5000 instead of 3000
+- Frontend proxy expects backend on port 3000
+
+### Fix Applied:
+- Changed `ecosystem.config.js` backend PORT from `5000` to `3000`
+- Now matches all other configurations
+
+---
+
+## Verification Checklist
+
+### On VM, verify ports are correct:
+
+```bash
+# 1. Check PM2 processes
+pm2 status
+
+# 2. Check what's listening on ports
+sudo lsof -i :3000  # Should show backend
+sudo lsof -i :3600  # Should show frontend
+
+# 3. Check backend .env file
+cat backend/.env | grep PORT
+# Should show: PORT=3000
+
+# 4. Test backend directly
+curl http://localhost:3000/api/health
+
+# 5. Test frontend proxy
+curl http://localhost:3600/api/health
 ```
-http://localhost:3000
-```
 
-This ensures API calls from the frontend dev server (port 3001) are forwarded to the backend (port 3000).
+---
 
-### Troubleshooting 504 Gateway Timeout
+## Configuration Files Summary
 
-If you see `504 Gateway Timeout` errors:
+### Backend Port Configuration:
+1. ✅ `backend/server.js` → Defaults to 3000
+2. ✅ `ecosystem.config.js` → **FIXED** to 3000
+3. ⚠️ `backend/.env` → Should have `PORT=3000` (check on VM)
 
-1. **Ensure backend is running FIRST:**
+### Frontend Port Configuration:
+1. ✅ `frontend/package.json` → PORT=3600 for dev
+2. ✅ `frontend/server.js` → PORT=3600 for production
+3. ✅ `ecosystem.config.js` → PORT=3600
+
+### API Connection:
+1. ✅ `frontend/src/services/api.js` → Uses `/api` in production
+2. ✅ `frontend/server.js` → Proxies `/api` to `http://localhost:3000`
+
+---
+
+## Important Notes
+
+1. **Backend .env on VM**: Make sure `backend/.env` has `PORT=3000`
+2. **PM2 Restart Required**: After fixing `ecosystem.config.js`, restart PM2:
    ```bash
-   cd backend
-   npm start
-   # Wait for: "Server is running on port 3000"
+   pm2 restart sol-emp-backend
+   pm2 save
    ```
+3. **Frontend Proxy**: The frontend server (`frontend/server.js`) automatically proxies `/api/*` requests to backend on port 3000
+4. **No Nginx Required**: The frontend Express server handles the proxy, so no nginx configuration needed
 
-2. **Test backend directly:**
-   ```bash
-   curl http://localhost:3000/api/health
-   # Should return: {"status":"OK","message":"Soliflex Quarters Manager API is running"}
-   ```
+---
 
-3. **Then start frontend:**
-   ```bash
-   cd frontend
-   npm start
-   ```
-
-4. **Verify .env files exist:**
-   - `backend/.env` should have `PORT=3000`
-   - `frontend/.env` should have `PORT=3001`
-
-### Important Notes
-
-- **Backend MUST be running before starting frontend**
-- If backend isn't running, you'll get 504 Gateway Timeout errors
-- The proxy only works when both servers are running
-- Always start backend first, then frontend
-
+## All Ports Are Now Correctly Configured! ✅
