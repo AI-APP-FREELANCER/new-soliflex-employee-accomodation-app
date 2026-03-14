@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth');
 const excelReader = require('../data/excelReader');
+const { getMISData } = require('../data/misReports');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
@@ -117,24 +118,34 @@ router.get('/', (req, res) => {
       }
     });
 
-    // 6. Total Advance Due Back (inactive agreements with advance)
+    // 6. Total Advance Due Back (inactive agreements where advance_received is null or 0)
     let totalAdvanceDueBack = 0;
     agreements.forEach(a => {
       const status = normalizeStatus(a.agreement_status || a.status);
       if (status === 'inactive') {
-        totalAdvanceDueBack += parseCurrency(a.agreement_advance_amount);
+        const advanceDueBack = parseCurrency(a.agreement_advance_due_back || a.agreement_advance_amount || 0);
+        const advanceReceived = parseCurrency(a.agreement_advance_received || 0);
+        // Only count if not yet received (received is 0 or null)
+        if (advanceReceived === 0 || !a.agreement_advance_received) {
+          totalAdvanceDueBack += advanceDueBack;
+        }
       }
     });
 
-    // 7. Total Net Received (placeholder - would need financial transaction data)
-    // For now, calculate as sum of advances from inactive agreements
+    // 7. Total Net Received (sum of actual advance_received from all agreements)
     let totalNetReceived = 0;
     agreements.forEach(a => {
-      const status = normalizeStatus(a.agreement_status || a.status);
-      if (status === 'inactive') {
-        // In a real system, this would come from payment records
-        // For now, we'll use a simplified calculation
-        totalNetReceived += parseCurrency(a.agreement_advance_amount) * 0.1; // Example: 10% received
+      const advanceReceived = parseCurrency(a.agreement_advance_received || 0);
+      totalNetReceived += advanceReceived;
+    });
+
+    // 8. Total Scheduled to Vacate
+    let totalScheduledToVacate = 0;
+    agreements.forEach(a => {
+      if (a.agreement_scheduled_to_vacate === true || 
+          a.agreement_scheduled_to_vacate === 'Yes' || 
+          a.agreement_scheduled_to_vacate === 'yes') {
+        totalScheduledToVacate++;
       }
     });
 
@@ -208,6 +219,7 @@ router.get('/', (req, res) => {
       totalAdvanceLocked,
       totalAdvanceDueBack,
       totalNetReceived,
+      totalScheduledToVacate,
       
       // Chart Data
       rentByDepartment,
@@ -220,6 +232,19 @@ router.get('/', (req, res) => {
       console.error('Analytics Error:', err.message);
     }
     res.status(500).json({ error: 'Server Error processing data' });
+  }
+});
+
+// GET /mis - Full MIS table data for dashboard (Owner Summary, Proactive Pipeline, Cost Optimization, Departmental, Financial & Compliance, By Owner)
+router.get('/mis', (req, res) => {
+  try {
+    const data = getMISData();
+    res.json(data);
+  } catch (err) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('MIS Error:', err.message);
+    }
+    res.status(500).json({ error: 'Server Error processing MIS data' });
   }
 });
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Table, Card, Button, Input, Tag, Space, Select, DatePicker, message, Modal, Form, Row, Col, Typography, Empty, Popconfirm } from 'antd';
-import { SearchOutlined, PlusOutlined, EditOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
+import { SearchOutlined, PlusOutlined, EditOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, UploadOutlined, CalendarOutlined, DollarOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { agreementAPI, residenceAPI } from '../services/api';
 import apiClient from '../services/api';
 import dayjs from 'dayjs';
@@ -31,6 +31,16 @@ const Agreements = () => {
   const fileInputRef = useRef(null);
   const currentUploadId = useRef(null);
   
+  // Vacate and Refund states
+  const [isRefundModalVisible, setIsRefundModalVisible] = useState(false);
+  const [isVacateModalVisible, setIsVacateModalVisible] = useState(false);
+  const [selectedAgreementForRefund, setSelectedAgreementForRefund] = useState(null);
+  const [selectedAgreementForVacate, setSelectedAgreementForVacate] = useState(null);
+  const [selectedResidence, setSelectedResidence] = useState(null);
+  const [maintenanceCut, setMaintenanceCut] = useState(0);
+  const [refundForm] = Form.useForm();
+  const [vacateForm] = Form.useForm();
+  
   // Use modern useSearchParams hook for reliable URL parameter reading
   const [searchParams] = useSearchParams();
 
@@ -51,6 +61,8 @@ const Agreements = () => {
         setRenewalFilter('Past Due');
       } else if (filterParam === 'due90') {
         setRenewalFilter('Due Soon');
+      } else if (filterParam === 'scheduledToVacate') {
+        setRenewalFilter('Scheduled to Vacate');
       }
     }
   }, [searchParams]);
@@ -77,7 +89,7 @@ const Agreements = () => {
     setLoading(true);
     try {
       // Always fetch ALL to ensure filters work on full dataset
-      const response = await agreementAPI.getAll('all');
+      const response = await agreementAPI.getAll({ status: 'all' });
       
       let data = [];
       if (Array.isArray(response.data)) {
@@ -113,7 +125,15 @@ const Agreements = () => {
 
     // 3. Renewal Urgency Filter (Matches Backend Calculation)
     if (renewalFilter) {
-      result = result.filter(item => item.computed_renewal_status === renewalFilter);
+      if (renewalFilter === 'Scheduled to Vacate') {
+        result = result.filter(item => 
+          item.agreement_scheduled_to_vacate === true || 
+          item.agreement_scheduled_to_vacate === 'Yes' || 
+          item.agreement_scheduled_to_vacate === 'yes'
+        );
+      } else {
+        result = result.filter(item => item.computed_renewal_status === renewalFilter);
+      }
     }
 
     // 4. Search Text
@@ -175,6 +195,37 @@ const Agreements = () => {
       },
     },
     {
+      title: 'Scheduled to Vacate',
+      key: 'scheduled_to_vacate',
+      render: (_, record) => {
+        const isScheduled = record.agreement_scheduled_to_vacate === true || 
+                           record.agreement_scheduled_to_vacate === 'Yes' || 
+                           record.agreement_scheduled_to_vacate === 'yes';
+        if (isScheduled && record.agreement_vacate_date) {
+          return <Tag color="orange">{formatDateForDisplay(record.agreement_vacate_date)}</Tag>;
+        }
+        return <Text type="secondary">-</Text>;
+      },
+    },
+    {
+      title: 'Advance Status',
+      key: 'advance_status',
+      render: (_, record) => {
+        const advanceReceived = parseFloat(record.agreement_advance_received || 0);
+        const advanceDueBack = parseFloat(record.agreement_advance_due_back || 0);
+        const status = String(record.agreement_status || '').toLowerCase();
+        
+        if (status === 'inactive') {
+          if (advanceReceived > 0) {
+            return <Tag color="green">Received: ₹{advanceReceived.toLocaleString()}</Tag>;
+          } else if (advanceDueBack > 0) {
+            return <Tag color="orange">Due Back: ₹{advanceDueBack.toLocaleString()}</Tag>;
+          }
+        }
+        return <Text type="secondary">-</Text>;
+      },
+    },
+    {
       title: 'Attachment',
       key: 'attachment',
       render: (_, record) => (
@@ -216,7 +267,47 @@ const Agreements = () => {
       key: 'actions',
       render: (_, record) => (
         <Space>
-          <Button icon={<EditOutlined />} onClick={() => handleEdit(record)} />
+          <Button icon={<EditOutlined />} onClick={() => handleEdit(record)} title="Edit">Edit</Button>
+          {(record.agreement_scheduled_to_vacate === true || 
+            record.agreement_scheduled_to_vacate === 'Yes' || 
+            record.agreement_scheduled_to_vacate === 'yes') ? (
+            <Popconfirm
+              title="Revoke Scheduled Vacate?"
+              description="Are you sure you want to cancel the scheduled vacate date? This will remove the vacate schedule."
+              onConfirm={() => handleRevokeVacate(record)}
+              okText="Yes, Revoke"
+              cancelText="Cancel"
+            >
+              <Button 
+                icon={<CloseCircleOutlined />} 
+                title="Revoke Scheduled Vacate"
+                danger
+              >
+                Revoke Vacate
+              </Button>
+            </Popconfirm>
+          ) : (
+            <Button 
+              icon={<CalendarOutlined />} 
+              onClick={() => handleScheduleVacate(record)}
+              title="Set to Vacate"
+            >
+              Set to Vacate
+            </Button>
+          )}
+          {(String(record.agreement_status || '').toLowerCase() === 'inactive' || 
+            record.agreement_scheduled_to_vacate === true || 
+            record.agreement_scheduled_to_vacate === 'Yes' || 
+            record.agreement_scheduled_to_vacate === 'yes') && (
+            <Button 
+              icon={<DollarOutlined />} 
+              onClick={() => handleProcessRefund(record)}
+              title="Process Refund"
+              type="primary"
+            >
+              Process Refund
+            </Button>
+          )}
         </Space>
       ),
     },
@@ -334,6 +425,128 @@ const Agreements = () => {
     }
   };
 
+  // Vacate and Refund Handlers
+  const handleScheduleVacate = (record) => {
+    setSelectedAgreementForVacate(record);
+    vacateForm.setFieldsValue({
+      agreement_vacate_date: record.agreement_vacate_date ? dayjs(record.agreement_vacate_date) : null
+    });
+    setIsVacateModalVisible(true);
+  };
+
+  const handleVacateModalOk = async () => {
+    try {
+      const values = await vacateForm.validateFields();
+      if (!values.agreement_vacate_date) {
+        message.error('Vacate date is required');
+        return;
+      }
+      
+      const vacateDate = values.agreement_vacate_date.format('YYYY-MM-DD');
+      await agreementAPI.scheduleVacate(selectedAgreementForVacate.agreement_id, {
+        agreement_vacate_date: vacateDate
+      });
+      
+      message.success('Agreement scheduled for vacating');
+      setIsVacateModalVisible(false);
+      setSelectedAgreementForVacate(null);
+      vacateForm.resetFields();
+      fetchAgreements();
+    } catch (error) {
+      const errorMessage = error.response?.data?.error || 'Failed to schedule vacate';
+      message.error(errorMessage);
+    }
+  };
+
+  const handleRevokeVacate = async (record) => {
+    try {
+      await agreementAPI.revokeVacate(record.agreement_id);
+      message.success('Scheduled vacate has been revoked');
+      fetchAgreements();
+    } catch (error) {
+      const errorMessage = error.response?.data?.error || 'Failed to revoke scheduled vacate';
+      message.error(errorMessage);
+    }
+  };
+
+  const handleProcessRefund = async (record) => {
+    setSelectedAgreementForRefund(record);
+    
+    // Fetch residence details
+    try {
+      const residenceResponse = await residenceAPI.getById(record.agreement_residence_id);
+      const residenceData = Array.isArray(residenceResponse.data) 
+        ? residenceResponse.data[0] 
+        : residenceResponse.data;
+      setSelectedResidence(residenceData);
+    } catch (error) {
+      // Continue even if residence fetch fails
+      setSelectedResidence(null);
+    }
+    
+    const advanceDueBack = parseFloat(record.agreement_advance_due_back || record.agreement_advance_amount || 0);
+    const initialMaintenanceCut = parseFloat(record.agreement_maintenance_cut || 0);
+    setMaintenanceCut(initialMaintenanceCut);
+    refundForm.setFieldsValue({
+      agreement_maintenance_cut: initialMaintenanceCut
+    });
+    setIsRefundModalVisible(true);
+  };
+
+  const handleRefundModalOk = async () => {
+    try {
+      const values = await refundForm.validateFields();
+      const maintenanceCut = parseFloat(values.agreement_maintenance_cut || 0);
+      
+      if (isNaN(maintenanceCut) || maintenanceCut < 0) {
+        message.error('Please enter a valid positive number for maintenance cut');
+        return;
+      }
+      
+      const advanceDueBack = parseFloat(
+        selectedAgreementForRefund.agreement_advance_due_back || 
+        selectedAgreementForRefund.agreement_advance_amount || 
+        0
+      );
+      
+      if (maintenanceCut > advanceDueBack) {
+        message.error('Maintenance cut cannot exceed advance due back amount');
+        return;
+      }
+      
+      await agreementAPI.processRefund(selectedAgreementForRefund.agreement_id, {
+        agreement_maintenance_cut: maintenanceCut
+      });
+      
+      message.success('Refund processed successfully');
+      setIsRefundModalVisible(false);
+      setSelectedAgreementForRefund(null);
+      setSelectedResidence(null);
+      setMaintenanceCut(0);
+      refundForm.resetFields();
+      fetchAgreements();
+    } catch (error) {
+      // Handle validation errors
+      if (error.errorFields) {
+        return; // Form validation errors are already shown
+      }
+      // Handle API errors
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to process refund';
+      message.error(errorMessage);
+    }
+  };
+
+  // Calculate advance returned (for display in refund modal)
+  const calculateAdvanceReturned = () => {
+    if (!selectedAgreementForRefund) return 0;
+    const advanceDueBack = parseFloat(
+      selectedAgreementForRefund.agreement_advance_due_back || 
+      selectedAgreementForRefund.agreement_advance_amount || 
+      0
+    );
+    return Math.max(0, advanceDueBack - parseFloat(maintenanceCut || 0));
+  };
+
   return (
     <div style={{ padding: '24px' }}>
       <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -386,6 +599,7 @@ const Agreements = () => {
             >
               <Option value="Past Due">Past Due</Option>
               <Option value="Due Soon">Due Soon</Option>
+              <Option value="Scheduled to Vacate">Scheduled to Vacate</Option>
             </Select>
           </Col>
           <Col xs={24} sm={6}>
@@ -497,6 +711,149 @@ const Agreements = () => {
             </Col>
           </Row>
         </Form>
+      </Modal>
+
+      {/* Vacate Modal */}
+      <Modal
+        title="Schedule Agreement for Vacating"
+        open={isVacateModalVisible}
+        onOk={handleVacateModalOk}
+        onCancel={() => {
+          setIsVacateModalVisible(false);
+          setSelectedAgreementForVacate(null);
+          vacateForm.resetFields();
+        }}
+        width={600}
+      >
+        <Form form={vacateForm} layout="vertical">
+          <Form.Item
+            name="agreement_vacate_date"
+            label="Vacate Date"
+            rules={[{ required: true, message: 'Please select vacate date' }]}
+          >
+            <DatePicker 
+              style={{ width: '100%' }} 
+              format="YYYY-MM-DD"
+              disabledDate={(current) => current && current < dayjs().startOf('day')}
+            />
+          </Form.Item>
+          {selectedAgreementForVacate && (
+            <Text type="secondary">
+              Agreement ID: {selectedAgreementForVacate.agreement_id} | 
+              Residence: {selectedAgreementForVacate.agreement_residence_id}
+            </Text>
+          )}
+        </Form>
+      </Modal>
+
+      {/* Refund Modal */}
+      <Modal
+        title="Process Advance Refund"
+        open={isRefundModalVisible}
+        onOk={handleRefundModalOk}
+        onCancel={() => {
+          setIsRefundModalVisible(false);
+          setSelectedAgreementForRefund(null);
+          setSelectedResidence(null);
+          setMaintenanceCut(0);
+          refundForm.resetFields();
+        }}
+        width={700}
+      >
+        {selectedAgreementForRefund && (
+          <Form form={refundForm} layout="vertical">
+            <Card size="small" style={{ marginBottom: 16 }}>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Text strong>Residence ID:</Text>
+                  <br />
+                  <Text>{selectedAgreementForRefund.agreement_residence_id}</Text>
+                </Col>
+                <Col span={12}>
+                  <Text strong>Owner Name:</Text>
+                  <br />
+                  <Text>{selectedResidence?.residence_owner_name || 'N/A'}</Text>
+                </Col>
+                <Col span={12} style={{ marginTop: 8 }}>
+                  <Text strong>Monthly Rent:</Text>
+                  <br />
+                  <Text>₹{Number(selectedAgreementForRefund.agreement_monthly_rent_amount || 0).toLocaleString()}</Text>
+                </Col>
+                <Col span={12} style={{ marginTop: 8 }}>
+                  <Text strong>Total Advance Paid:</Text>
+                  <br />
+                  <Text>₹{Number(selectedAgreementForRefund.agreement_advance_amount || 0).toLocaleString()}</Text>
+                </Col>
+                <Col span={24} style={{ marginTop: 8 }}>
+                  <Text strong>Advance Due Back:</Text>
+                  <br />
+                  <Text>₹{Number(
+                    selectedAgreementForRefund.agreement_advance_due_back || 
+                    selectedAgreementForRefund.agreement_advance_amount || 
+                    0
+                  ).toLocaleString()}</Text>
+                </Col>
+              </Row>
+            </Card>
+            
+            <Form.Item
+              name="agreement_maintenance_cut"
+              label="Maintenance Cut Amount (₹)"
+              rules={[
+                { required: true, message: 'Please enter maintenance cut amount' },
+                {
+                  validator: (_, value) => {
+                    const numValue = parseFloat(value);
+                    if (isNaN(numValue) || numValue < 0) {
+                      return Promise.reject(new Error('Amount must be a positive number'));
+                    }
+                    const advanceDueBack = parseFloat(
+                      selectedAgreementForRefund.agreement_advance_due_back || 
+                      selectedAgreementForRefund.agreement_advance_amount || 
+                      0
+                    );
+                    if (numValue > advanceDueBack) {
+                      return Promise.reject(new Error('Maintenance cut cannot exceed advance due back amount'));
+                    }
+                    return Promise.resolve();
+                  }
+                }
+              ]}
+            >
+              <Input 
+                type="number" 
+                prefix="₹" 
+                placeholder="Enter amount deducted by landlord"
+                step="0.01"
+                min="0"
+                onChange={(e) => {
+                  const inputValue = e.target.value;
+                  const value = parseFloat(inputValue) || 0;
+                  setMaintenanceCut(value);
+                  // Update form value to ensure validation works
+                  refundForm.setFieldsValue({
+                    agreement_maintenance_cut: value
+                  });
+                }}
+                onBlur={(e) => {
+                  // Ensure value is set on blur
+                  const value = parseFloat(e.target.value) || 0;
+                  refundForm.setFieldsValue({
+                    agreement_maintenance_cut: value
+                  });
+                }}
+              />
+            </Form.Item>
+            
+            <Form.Item label="Advance Returned (Calculated)">
+              <Input 
+                value={`₹${calculateAdvanceReturned().toLocaleString()}`}
+                disabled
+                style={{ fontWeight: 'bold', color: '#52c41a' }}
+              />
+            </Form.Item>
+          </Form>
+        )}
       </Modal>
     </div>
   );

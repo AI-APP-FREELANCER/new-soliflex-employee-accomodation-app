@@ -85,6 +85,10 @@ export const agreementAPI = {
     const baseUrl = api.defaults.baseURL || '';
     return `${baseUrl}/agreement/${id}/attachment`;
   },
+  // Vacate and Refund methods
+  scheduleVacate: (id, data) => api.post(`/agreement/${id}/schedule-vacate`, data),
+  revokeVacate: (id) => api.post(`/agreement/${id}/revoke-vacate`),
+  processRefund: (id, data) => api.post(`/agreement/${id}/process-refund`, data),
 };
 
 // Employee APIs

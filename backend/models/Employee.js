@@ -8,7 +8,10 @@ class Employee {
     this.employee_department = data.employee_department || null;
     this.employee_designation = data.employee_designation || null;
     this.employee_date_of_joining = data.employee_date_of_joining || null;
-    
+    // MIS: last working day for 15-day notice and replacement planning
+    this.employee_last_working_date = data.employee_last_working_date || null;
+    this.employee_notice_served = data.employee_notice_served === true || data.employee_notice_served === 'Yes' || data.employee_notice_served === 'yes' || false;
+
     // Legacy status field (map to new status)
     const legacyStatus = data.employee_status || 'Active';
     this.employee_status = legacyStatus;

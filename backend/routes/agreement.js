@@ -310,10 +310,32 @@ router.put('/:id', (req, res) => {
     const updates = req.body;
     delete updates.agreement_id; // Don't allow changing ID
     
+    // Validate maintenance cut doesn't exceed advance amount
+    if (updates.agreement_maintenance_cut !== undefined) {
+      const agreement = excelReader.getAgreements('all').find(a => a.agreement_id === agreementId);
+      if (agreement) {
+        const advanceDueBack = parseFloat(updates.agreement_advance_due_back || agreement.agreement_advance_due_back || agreement.agreement_advance_amount || 0);
+        const maintenanceCut = parseFloat(updates.agreement_maintenance_cut);
+        if (maintenanceCut > advanceDueBack) {
+          return res.status(400).json({ error: 'Maintenance cut cannot exceed advance due back amount' });
+        }
+        // Auto-calculate advance received
+        updates.agreement_advance_received = advanceDueBack - maintenanceCut;
+      }
+    }
+    
+    // Format date fields to YYYY-MM-DD
+    if (updates.agreement_vacate_date) {
+      const vacateDate = dayjs(updates.agreement_vacate_date);
+      if (vacateDate.isValid()) {
+        updates.agreement_vacate_date = vacateDate.format('YYYY-MM-DD');
+      }
+    }
+    
     const updatedAgreement = excelReader.updateAgreement(agreementId, updates);
     if (!updatedAgreement) return res.status(404).json({ error: 'Agreement not found' });
     
-    res.json(updatedAgreement);
+    res.json(enrichAgreement(updatedAgreement));
   } catch (error) {
     if (process.env.NODE_ENV === 'development') {
       console.error('Error updating agreement:', error.message);
@@ -331,10 +353,110 @@ router.patch('/:id/deactivate', (req, res) => {
     const deactivatedAgreement = excelReader.deactivateAgreement(agreementId, reason);
     if (!deactivatedAgreement) return res.status(404).json({ error: 'Agreement not found' });
     
-    res.json(deactivatedAgreement);
+    res.json(enrichAgreement(deactivatedAgreement));
   } catch (error) {
     if (process.env.NODE_ENV === 'development') {
       console.error('Error deactivating agreement:', error.message);
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /:id/schedule-vacate - Schedule agreement for vacating
+router.post('/:id/schedule-vacate', (req, res) => {
+  try {
+    const agreementId = req.params.id;
+    const { agreement_vacate_date } = req.body;
+    
+    if (!agreement_vacate_date) {
+      return res.status(400).json({ error: 'Vacate date is required' });
+    }
+    
+    // Format date to YYYY-MM-DD
+    const vacateDate = dayjs(agreement_vacate_date);
+    if (!vacateDate.isValid()) {
+      return res.status(400).json({ error: 'Invalid vacate date format' });
+    }
+    
+    const updates = {
+      agreement_scheduled_to_vacate: true,
+      agreement_vacate_date: vacateDate.format('YYYY-MM-DD')
+    };
+    
+    const updatedAgreement = excelReader.updateAgreement(agreementId, updates);
+    if (!updatedAgreement) return res.status(404).json({ error: 'Agreement not found' });
+    
+    res.json(enrichAgreement(updatedAgreement));
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error scheduling vacate:', error.message);
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /:id/revoke-vacate - Revoke scheduled vacate status
+router.post('/:id/revoke-vacate', (req, res) => {
+  try {
+    const agreementId = req.params.id;
+    
+    const updates = {
+      agreement_scheduled_to_vacate: false,
+      agreement_vacate_date: null
+    };
+    
+    const updatedAgreement = excelReader.updateAgreement(agreementId, updates);
+    if (!updatedAgreement) return res.status(404).json({ error: 'Agreement not found' });
+    
+    res.json(enrichAgreement(updatedAgreement));
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error revoking vacate:', error.message);
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /:id/process-refund - Process advance refund
+router.post('/:id/process-refund', (req, res) => {
+  try {
+    const agreementId = req.params.id;
+    const { agreement_maintenance_cut } = req.body;
+    
+    if (agreement_maintenance_cut === undefined || agreement_maintenance_cut === null) {
+      return res.status(400).json({ error: 'Maintenance cut amount is required' });
+    }
+    
+    const agreement = excelReader.getAgreements('all').find(a => a.agreement_id === agreementId);
+    if (!agreement) return res.status(404).json({ error: 'Agreement not found' });
+    
+    // Calculate advance due back if not set
+    const advanceDueBack = parseFloat(agreement.agreement_advance_due_back || agreement.agreement_advance_amount || 0);
+    const maintenanceCut = parseFloat(agreement_maintenance_cut);
+    
+    if (maintenanceCut < 0) {
+      return res.status(400).json({ error: 'Maintenance cut cannot be negative' });
+    }
+    
+    if (maintenanceCut > advanceDueBack) {
+      return res.status(400).json({ error: 'Maintenance cut cannot exceed advance due back amount' });
+    }
+    
+    const advanceReceived = advanceDueBack - maintenanceCut;
+    
+    const updates = {
+      agreement_advance_due_back: advanceDueBack,
+      agreement_maintenance_cut: maintenanceCut,
+      agreement_advance_received: advanceReceived
+    };
+    
+    const updatedAgreement = excelReader.updateAgreement(agreementId, updates);
+    if (!updatedAgreement) return res.status(404).json({ error: 'Agreement not found' });
+    
+    res.json(enrichAgreement(updatedAgreement));
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Error processing refund:', error.message);
     }
     res.status(500).json({ error: 'Internal server error' });
   }

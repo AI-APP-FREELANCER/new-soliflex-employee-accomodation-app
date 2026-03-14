@@ -11,7 +11,8 @@ class Residence {
     this.residence_pin_code = data.residence_pin_code || null;
     this.residence_country = data.residence_country || null;
     this.residence_house_count = data.residence_house_count || 0;
-    
+    this.residence_owner_rating = data.residence_owner_rating != null ? String(data.residence_owner_rating) : null;
+
     // Legacy status field (map to new status)
     const legacyStatus = data.residence_status || 'Active';
     this.residence_status = legacyStatus;

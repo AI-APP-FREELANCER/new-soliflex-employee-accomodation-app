@@ -106,6 +106,20 @@ class ExcelReader {
             if (sheetName === 'agreement_master') {
               processedRow.agreement_possesion_date = this.convertExcelDate(processedRow.agreement_possesion_date);
               processedRow.agreement_renewal_due_date = this.convertExcelDate(processedRow.agreement_renewal_due_date);
+              processedRow.agreement_vacate_date = this.convertExcelDate(processedRow.agreement_vacate_date);
+
+              // Initialize new vacate and refund fields with defaults if missing
+              processedRow.agreement_scheduled_to_vacate = processedRow.agreement_scheduled_to_vacate === true || 
+                                                          processedRow.agreement_scheduled_to_vacate === 'Yes' || 
+                                                          processedRow.agreement_scheduled_to_vacate === 'yes' || 
+                                                          false;
+              processedRow.agreement_advance_due_back = parseFloat(processedRow.agreement_advance_due_back) || 0;
+              processedRow.agreement_advance_received = parseFloat(processedRow.agreement_advance_received) || 0;
+              processedRow.agreement_maintenance_cut = parseFloat(processedRow.agreement_maintenance_cut) || 0;
+              processedRow.agreement_notice_period_days = processedRow.agreement_notice_period_days != null ? parseInt(processedRow.agreement_notice_period_days, 10) : null;
+              processedRow.agreement_notice_due_by_date = this.convertExcelDate(processedRow.agreement_notice_due_by_date) || processedRow.agreement_notice_due_by_date || null;
+              processedRow.agreement_statutory_status = processedRow.agreement_statutory_status != null ? String(processedRow.agreement_statutory_status) : null;
+              processedRow.agreement_document_location = processedRow.agreement_document_location != null ? String(processedRow.agreement_document_location) : null;
 
               // Always align renewal due date to possession date (11 months - 90 days)
               const calculatedRenewal = this.calculateRenewalDueDate(processedRow.agreement_possesion_date);
@@ -114,6 +128,10 @@ class ExcelReader {
               }
             } else if (sheetName === 'employee_master') {
               processedRow.employee_date_of_joining = this.convertExcelDate(processedRow.employee_date_of_joining);
+              processedRow.employee_last_working_date = this.convertExcelDate(processedRow.employee_last_working_date) || processedRow.employee_last_working_date || null;
+              processedRow.employee_notice_served = processedRow.employee_notice_served === true || processedRow.employee_notice_served === 'Yes' || processedRow.employee_notice_served === 'yes' || false;
+            } else if (sheetName === 'residence_master') {
+              processedRow.residence_owner_rating = processedRow.residence_owner_rating != null ? String(processedRow.residence_owner_rating) : null;
             }
             
             return processedRow;
@@ -315,6 +333,10 @@ class ExcelReader {
         } else if (updates.status === 'inactive' && agreement.status === 'active') {
           // Deactivating
           agreement.inactiveDate = now;
+          // When status becomes inactive, set advance_due_back if not already set
+          if (!agreement.agreement_advance_due_back || agreement.agreement_advance_due_back === 0) {
+            agreement.agreement_advance_due_back = parseFloat(agreement.agreement_advance_amount) || 0;
+          }
         }
         agreement.status = updates.status;
         agreement.agreement_status = updates.status === 'active' ? 'Active' : 'Inactive';
@@ -326,6 +348,30 @@ class ExcelReader {
         });
         delete updates.status;
         delete updates.reason;
+      }
+
+      // Handle vacate date conversion if provided
+      if (updates.agreement_vacate_date) {
+        updates.agreement_vacate_date = this.convertExcelDate(updates.agreement_vacate_date) || updates.agreement_vacate_date;
+      }
+
+      // Handle numeric fields for refund
+      if (updates.agreement_maintenance_cut !== undefined) {
+        updates.agreement_maintenance_cut = parseFloat(updates.agreement_maintenance_cut) || 0;
+      }
+      if (updates.agreement_advance_received !== undefined) {
+        updates.agreement_advance_received = parseFloat(updates.agreement_advance_received) || 0;
+      }
+      if (updates.agreement_advance_due_back !== undefined) {
+        updates.agreement_advance_due_back = parseFloat(updates.agreement_advance_due_back) || 0;
+      }
+
+      // Handle scheduled_to_vacate boolean conversion
+      if (updates.agreement_scheduled_to_vacate !== undefined) {
+        updates.agreement_scheduled_to_vacate = updates.agreement_scheduled_to_vacate === true || 
+                                              updates.agreement_scheduled_to_vacate === 'Yes' || 
+                                              updates.agreement_scheduled_to_vacate === 'yes' || 
+                                              false;
       }
 
       const merged = { ...agreement, ...updates };
@@ -362,6 +408,21 @@ class ExcelReader {
     }];
     // Sync legacy status
     agreementWithDue.agreement_status = agreementWithDue.status === 'active' ? 'Active' : 'Inactive';
+
+    // Initialize new vacate and refund fields with defaults
+    agreementWithDue.agreement_scheduled_to_vacate = agreementWithDue.agreement_scheduled_to_vacate === true || 
+                                                     agreementWithDue.agreement_scheduled_to_vacate === 'Yes' || 
+                                                     agreementWithDue.agreement_scheduled_to_vacate === 'yes' || 
+                                                     false;
+    agreementWithDue.agreement_vacate_date = agreementWithDue.agreement_vacate_date || null;
+    agreementWithDue.agreement_advance_due_back = parseFloat(agreementWithDue.agreement_advance_due_back) || 0;
+    agreementWithDue.agreement_advance_received = parseFloat(agreementWithDue.agreement_advance_received) || 0;
+    agreementWithDue.agreement_maintenance_cut = parseFloat(agreementWithDue.agreement_maintenance_cut) || 0;
+
+    // Convert vacate date if provided
+    if (agreementWithDue.agreement_vacate_date) {
+      agreementWithDue.agreement_vacate_date = this.convertExcelDate(agreementWithDue.agreement_vacate_date) || agreementWithDue.agreement_vacate_date;
+    }
 
     this.data.agreement_master.push(agreementWithDue);
     return agreementWithDue;
