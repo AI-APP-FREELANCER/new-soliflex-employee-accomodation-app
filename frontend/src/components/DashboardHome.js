@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Spin, Typography, Button, Dropdown, message } from 'antd';
+import { Card, Table, Spin, Typography, Button, Dropdown, message, Alert } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import api, { agreementAPI, residenceAPI, employeeAPI } from '../services/api';
-import { DownloadOutlined, FileExcelOutlined } from '@ant-design/icons';
+import { DownloadOutlined, FileExcelOutlined, FileTextOutlined } from '@ant-design/icons';
 import { exportTableToExcel } from '../utils/exportUtils';
 import { formatDateForDisplay } from '../utils/dateUtils';
 import dayjs from 'dayjs';
@@ -192,10 +192,27 @@ const DashboardHome = () => {
 
   return (
     <div style={{ padding: '24px' }}>
-      <Title level={2} style={{ marginBottom: '24px' }}>MIS Dashboard</Title>
+      <Title level={2} style={{ marginBottom: '16px' }}>MIS Dashboard</Title>
+      <Alert
+        type="info"
+        showIcon
+        icon={<FileTextOutlined />}
+        style={{ marginBottom: 24 }}
+        message="Agreement operations (PDF upload, schedule vacate, process advance refund)"
+        description={
+          <>
+            These actions are on the <strong>Agreements</strong> page—not on this MIS screen. Use the sidebar or the button below to open the full agreements table with Attachment, Set to Vacate / Revoke, and Process Refund.
+            <div style={{ marginTop: 12 }}>
+              <Button type="primary" icon={<FileTextOutlined />} onClick={() => navigate('/agreements')}>
+                Go to Agreements
+              </Button>
+            </div>
+          </>
+        }
+      />
 
-      {/* Module 0: Owner's Summary */}
-      <Card title="Module 0: Owner's Summary (Executive Table)" style={{ marginBottom: 24 }}>
+      {/* 1. Owner's Summary */}
+      <Card title="1. Owner's Summary (Executive Table)" style={{ marginBottom: 24 }}>
         <Table
           dataSource={misData.ownerSummary || []}
           columns={ownerSummaryColumns}
@@ -205,9 +222,9 @@ const DashboardHome = () => {
         />
       </Card>
 
-      {/* Module 1: Proactive Workforce & Property Pipeline */}
-      <Title level={4} style={{ marginTop: 24, marginBottom: 16 }}>Module 1: Proactive Workforce & Property Pipeline</Title>
-      <Card title="1.1 Upcoming Vacancy & Replacement Tracker" style={{ marginBottom: 16 }}>
+      {/* 2. Proactive Workforce & Property Pipeline */}
+      <Title level={4} style={{ marginTop: 24, marginBottom: 16 }}>2. Proactive Workforce & Property Pipeline</Title>
+      <Card title="2.1 Upcoming Vacancy & Replacement Tracker" style={{ marginBottom: 16 }}>
         <Table
           dataSource={misData.upcomingVacancyReplacementTracker || []}
           columns={[
@@ -225,7 +242,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="1.2 Properties Becoming Available (Next 90 Days)" style={{ marginBottom: 16 }}>
+      <Card title="2.2 Properties Becoming Available (Next 90 Days)" style={{ marginBottom: 16 }}>
         <Table
           dataSource={misData.propertiesBecomingAvailable || []}
           columns={[
@@ -242,7 +259,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="1.3 Replacement Planning Summary (by Property)" style={{ marginBottom: 24 }}>
+      <Card title="2.3 Replacement Planning Summary (by Property)" style={{ marginBottom: 24 }}>
         <Table
           dataSource={misData.replacementPlanningSummary || []}
           columns={[
@@ -261,9 +278,9 @@ const DashboardHome = () => {
         />
       </Card>
 
-      {/* Module 2: Cost Optimization & Property Efficiency */}
-      <Title level={4} style={{ marginTop: 24, marginBottom: 16 }}>Module 2: Cost Optimization & Property Efficiency</Title>
-      <Card title="2.1 Property Utilization & Opportunity Cost" style={{ marginBottom: 16 }}>
+      {/* 3. Cost Optimization & Property Efficiency */}
+      <Title level={4} style={{ marginTop: 24, marginBottom: 16 }}>3. Cost Optimization & Property Efficiency</Title>
+      <Card title="3.1 Property Utilization & Opportunity Cost" style={{ marginBottom: 16 }}>
         <Table
           dataSource={misData.propertyUtilizationOpportunityCost || []}
           columns={[
@@ -280,7 +297,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="2.2 Cost by Property" style={{ marginBottom: 16 }}>
+      <Card title="3.2 Cost by Property" style={{ marginBottom: 16 }}>
         <Table
           dataSource={misData.costByProperty || []}
           columns={[
@@ -298,7 +315,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="2.3 Agreement ROI Ledger" style={{ marginBottom: 24 }}>
+      <Card title="3.3 Agreement ROI Ledger" style={{ marginBottom: 24 }}>
         <Table
           dataSource={misData.agreementROILedger || []}
           columns={[
@@ -333,7 +350,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="3.2 Designation-Wise Spend Analysis" style={{ marginBottom: 16 }}>
+      <Card title="4.2 Designation-Wise Spend Analysis" style={{ marginBottom: 16 }}>
         <Table
           dataSource={misData.designationWiseSpend || []}
           columns={[
@@ -349,7 +366,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="3.3 Department-Wise Employee Summary" style={{ marginBottom: 16 }}>
+      <Card title="4.3 Department-Wise Employee Summary" style={{ marginBottom: 16 }}>
         <Table
           dataSource={misData.departmentWiseEmployeeSummary || []}
           columns={[
@@ -365,7 +382,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="3.4 Employee Master (Enhanced)" style={{ marginBottom: 24 }}>
+      <Card title="4.4 Employee Master (Enhanced)" style={{ marginBottom: 24 }}>
         <Table
           dataSource={misData.employeeMasterEnhanced || []}
           columns={[
@@ -387,9 +404,9 @@ const DashboardHome = () => {
         />
       </Card>
 
-      {/* Module 4: Financial Health & Compliance Audit */}
-      <Title level={4} style={{ marginTop: 24, marginBottom: 16 }}>Module 4: Financial Health & Compliance Audit</Title>
-      <Card title="4.1 Advance & Refund Liquidity" style={{ marginBottom: 16 }}>
+      {/* 5. Financial Health & Compliance Audit */}
+      <Title level={4} style={{ marginTop: 24, marginBottom: 16 }}>5. Financial Health & Compliance Audit</Title>
+      <Card title="5.1 Advance & Refund Liquidity" style={{ marginBottom: 16 }}>
         <Table
           dataSource={misData.advanceRefundLiquidity || []}
           columns={[
@@ -408,7 +425,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="4.2 Advance Pipeline" style={{ marginBottom: 16 }}>
+      <Card title="5.2 Advance Pipeline" style={{ marginBottom: 16 }}>
         <Table
           dataSource={misData.advancePipeline || []}
           columns={[
@@ -426,7 +443,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="4.3 Compliance & Renewal Risk" style={{ marginBottom: 16 }}>
+      <Card title="5.3 Compliance & Renewal Risk" style={{ marginBottom: 16 }}>
         <Table
           dataSource={misData.complianceRenewalRisk || []}
           columns={[
@@ -459,7 +476,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="4.5 Renewals Due in Next 90 Days" style={{ marginBottom: 16 }}>
+      <Card title="5.5 Renewals Due in Next 90 Days" style={{ marginBottom: 16 }}>
         <Table
           dataSource={misData.renewalsDueSoon || []}
           columns={[
@@ -475,7 +492,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="4.6 Scheduled to Vacate" style={{ marginBottom: 16 }}>
+      <Card title="5.6 Scheduled to Vacate" style={{ marginBottom: 16 }}>
         <Table
           dataSource={misData.scheduledToVacate || []}
           columns={[
@@ -492,7 +509,7 @@ const DashboardHome = () => {
           size="small"
         />
       </Card>
-      <Card title="4.7 Refund Status (Pending vs Processed)" style={{ marginBottom: 24 }}>
+      <Card title="5.7 Refund Status (Pending vs Processed)" style={{ marginBottom: 24 }}>
         <Table
           dataSource={misData.refundStatus || []}
           columns={[
@@ -511,9 +528,9 @@ const DashboardHome = () => {
         />
       </Card>
 
-      {/* Module 5: Owner / Landlord View */}
-      <Title level={4} style={{ marginTop: 24, marginBottom: 16 }}>Module 5: Owner / Landlord View</Title>
-      <Card title="5.1 By Owner (Landlord)" style={{ marginBottom: 24 }}>
+      {/* 6. Owner / Landlord View */}
+      <Title level={4} style={{ marginTop: 24, marginBottom: 16 }}>6. Owner / Landlord View</Title>
+      <Card title="6.1 By Owner (Landlord)" style={{ marginBottom: 24 }}>
         <Table
           dataSource={misData.byOwnerLandlord || []}
           columns={[

@@ -12,6 +12,10 @@ class Residence {
     this.residence_country = data.residence_country || null;
     this.residence_house_count = data.residence_house_count || 0;
     this.residence_owner_rating = data.residence_owner_rating != null ? String(data.residence_owner_rating) : null;
+    // Optional owner photo: file extension stored when uploaded (jpg|png|webp); actual file under owner_photos/
+    this.residence_owner_photo_ext = data.residence_owner_photo_ext
+      ? String(data.residence_owner_photo_ext).toLowerCase().replace(/^\./, '')
+      : '';
 
     // Legacy status field (map to new status)
     const legacyStatus = data.residence_status || 'Active';

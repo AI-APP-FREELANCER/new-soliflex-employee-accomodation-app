@@ -58,6 +58,11 @@ export const residenceAPI = {
   create: (data) => api.post('/residence', data),
   update: (id, data) => api.put(`/residence/${id}`, data),
   deactivate: (id, data) => api.patch(`/residence/${id}/deactivate`, data),
+  uploadOwnerPhoto: (id, formData) =>
+    api.post(`/residence/${id}/owner-photo`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+  deleteOwnerPhoto: (id) => api.delete(`/residence/${id}/owner-photo`),
 };
 
 // Agreement APIs
@@ -98,6 +103,11 @@ export const employeeAPI = {
   create: (data) => api.post('/employee', data),
   update: (id, data) => api.put(`/employee/${id}`, data),
   deactivate: (id, data) => api.patch(`/employee/${id}/deactivate`, data),
+  uploadPhoto: (id, formData) =>
+    api.post(`/employee/${id}/photo`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+  deletePhoto: (id) => api.delete(`/employee/${id}/photo`),
 };
 
 // Analytics/Reporting APIs

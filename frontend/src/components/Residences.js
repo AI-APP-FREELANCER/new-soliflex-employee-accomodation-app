@@ -16,9 +16,13 @@ import {
   Dropdown,
   Row,
   Col,
+  Checkbox,
+  Modal,
+  Popconfirm,
 } from 'antd';
-import { PlusOutlined, EditOutlined, EyeOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, EyeOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined, PictureOutlined, UploadOutlined, DeleteOutlined } from '@ant-design/icons';
 import { residenceAPI, agreementAPI, employeeAPI } from '../services/api';
+import api from '../services/api';
 import { exportToPDF, exportTableToExcel } from '../utils/exportUtils';
 import { formatDateForDisplay } from '../utils/dateUtils';
 import dayjs from 'dayjs';
@@ -40,6 +44,13 @@ const Residences = () => {
   const [isMobile, setIsMobile] = useState(false);
   const [form] = Form.useForm();
   const tableRef = useRef(null);
+  const ownerPhotoInputRef = useRef(null);
+  const currentOwnerPhotoUploadId = useRef(null);
+
+  const [ownerDrawerImgUrl, setOwnerDrawerImgUrl] = useState(null);
+  const [ownerPhotoModalOpen, setOwnerPhotoModalOpen] = useState(false);
+  const [ownerPhotoModalUrl, setOwnerPhotoModalUrl] = useState(null);
+  const [ownerPhotoModalCaption, setOwnerPhotoModalCaption] = useState('');
 
   // Responsive detection
   useEffect(() => {
@@ -54,6 +65,33 @@ const Residences = () => {
   useEffect(() => {
     fetchResidences();
   }, [statusFilter]);
+
+  useEffect(() => {
+    if (!drawerVisible || !selectedResidence?.residence_id) {
+      setOwnerDrawerImgUrl(null);
+      return;
+    }
+    if (!selectedResidence.has_owner_photo) {
+      setOwnerDrawerImgUrl(null);
+      return;
+    }
+    const urlRef = { current: null };
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get(`/residence/${selectedResidence.residence_id}/owner-photo`, { responseType: 'blob' });
+        if (cancelled) return;
+        urlRef.current = URL.createObjectURL(res.data);
+        setOwnerDrawerImgUrl(urlRef.current);
+      } catch {
+        if (!cancelled) setOwnerDrawerImgUrl(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    };
+  }, [drawerVisible, selectedResidence?.residence_id, selectedResidence?.has_owner_photo]);
 
   const fetchResidences = async () => {
     setLoading(true);
@@ -128,6 +166,81 @@ const Residences = () => {
       message.error(error.response?.data?.error || 'Failed to save residence');
       // Error handled by message.error above
     }
+  };
+
+  const isValidImageFile = (file) => {
+    const okMime = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.type);
+    if (okMime) return true;
+    return /\.(jpe?g|png|webp)$/i.test(file.name);
+  };
+
+  const triggerOwnerPhotoUpload = (residenceId) => {
+    currentOwnerPhotoUploadId.current = residenceId;
+    ownerPhotoInputRef.current?.click();
+  };
+
+  const handleOwnerPhotoFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!isValidImageFile(file)) {
+      message.error('Only JPG, JPEG, PNG and WebP images are allowed');
+      return;
+    }
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      message.error('Image must be 5MB or smaller');
+      return;
+    }
+    const rid = currentOwnerPhotoUploadId.current;
+    currentOwnerPhotoUploadId.current = null;
+    if (!rid) return;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      await residenceAPI.uploadOwnerPhoto(rid, formData);
+      message.success('Owner photo uploaded');
+      await fetchResidences();
+      if (selectedResidence?.residence_id === rid) {
+        const res = await residenceAPI.getById(rid);
+        setSelectedResidence(res.data);
+      }
+    } catch (error) {
+      message.error(error.response?.data?.error || 'Failed to upload photo');
+    }
+  };
+
+  const handleDeleteOwnerPhoto = async (record) => {
+    try {
+      await residenceAPI.deleteOwnerPhoto(record.residence_id);
+      message.success('Owner photo removed');
+      await fetchResidences();
+      if (selectedResidence?.residence_id === record.residence_id) {
+        const res = await residenceAPI.getById(record.residence_id);
+        setSelectedResidence(res.data);
+      }
+    } catch (error) {
+      message.error(error.response?.data?.error || 'Failed to remove photo');
+    }
+  };
+
+  const openOwnerPhotoModal = async (record) => {
+    try {
+      const res = await api.get(`/residence/${record.residence_id}/owner-photo`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      setOwnerPhotoModalUrl(url);
+      setOwnerPhotoModalCaption(`${record.residence_owner_name || 'Owner'} · ${record.residence_id}`);
+      setOwnerPhotoModalOpen(true);
+    } catch {
+      message.error('Could not load photo');
+    }
+  };
+
+  const closeOwnerPhotoModal = () => {
+    if (ownerPhotoModalUrl) URL.revokeObjectURL(ownerPhotoModalUrl);
+    setOwnerPhotoModalUrl(null);
+    setOwnerPhotoModalOpen(false);
+    setOwnerPhotoModalCaption('');
   };
 
   // Filter residences based on search text
@@ -267,10 +380,23 @@ const Residences = () => {
       ),
     },
     {
+      title: 'Owner photo',
+      key: 'has_owner_photo',
+      width: 110,
+      align: 'center',
+      render: (_, record) => (
+        <Checkbox
+          checked={!!record.has_owner_photo}
+          disabled
+          title={record.has_owner_photo ? 'Photo on file' : 'No photo uploaded'}
+        />
+      ),
+    },
+    {
       title: 'Actions',
       key: 'actions',
       render: (_, record) => (
-        <Space>
+        <Space wrap size="small">
           <Button
             type="link"
             icon={<EyeOutlined />}
@@ -285,6 +411,34 @@ const Residences = () => {
           >
             Edit
           </Button>
+          {record.has_owner_photo && (
+            <Button
+              type="link"
+              icon={<PictureOutlined />}
+              onClick={() => openOwnerPhotoModal(record)}
+            >
+              Photo
+            </Button>
+          )}
+          <Button
+            type="link"
+            icon={<UploadOutlined />}
+            onClick={() => triggerOwnerPhotoUpload(record.residence_id)}
+          >
+            Upload photo
+          </Button>
+          {record.has_owner_photo && (
+            <Popconfirm
+              title="Remove owner photo?"
+              onConfirm={() => handleDeleteOwnerPhoto(record)}
+              okText="Remove"
+              cancelText="Cancel"
+            >
+              <Button type="link" danger icon={<DeleteOutlined />}>
+                Remove
+              </Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -351,6 +505,14 @@ const Residences = () => {
           <Option value="all">Show All</Option>
         </Select>
       </div>
+
+      <input
+        type="file"
+        ref={ownerPhotoInputRef}
+        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+        style={{ display: 'none' }}
+        onChange={handleOwnerPhotoFileChange}
+      />
 
       <div ref={tableRef}>
         {isMobile ? (
@@ -433,6 +595,23 @@ const Residences = () => {
                       <Tag color={residence.residence_status === 'Active' ? 'green' : 'red'}>
                         {residence.residence_status}
                       </Tag>
+                    </div>
+                    <div>
+                      <Text strong>Owner photo on file: </Text>
+                      <Checkbox checked={!!residence.has_owner_photo} disabled />
+                      <Button
+                        type="link"
+                        size="small"
+                        style={{ paddingLeft: 8 }}
+                        onClick={() => triggerOwnerPhotoUpload(residence.residence_id)}
+                      >
+                        Upload
+                      </Button>
+                      {residence.has_owner_photo && (
+                        <Button type="link" size="small" onClick={() => openOwnerPhotoModal(residence)}>
+                          View
+                        </Button>
+                      )}
                     </div>
                   </Space>
                 </Card>
@@ -520,6 +699,70 @@ const Residences = () => {
                 </Tag>
               </Descriptions.Item>
             </Descriptions>
+
+            <Title level={5} style={{ marginTop: '24px' }}>
+              Owner photograph
+            </Title>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+              {selectedResidence.residence_owner_name || 'Owner'} · {selectedResidence.residence_id}
+            </Text>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <div
+                style={{
+                  width: 120,
+                  height: 120,
+                  borderRadius: 8,
+                  border: '1px solid #d9d9d9',
+                  overflow: 'hidden',
+                  background: '#fafafa',
+                  flexShrink: 0,
+                }}
+              >
+                {selectedResidence.has_owner_photo && ownerDrawerImgUrl ? (
+                  <img
+                    src={ownerDrawerImgUrl}
+                    alt={`${selectedResidence.residence_owner_name || 'Owner'} (${selectedResidence.residence_id})`}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      height: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#bfbfbf',
+                      fontSize: 12,
+                      padding: 8,
+                      textAlign: 'center',
+                    }}
+                  >
+                    No photo uploaded
+                  </div>
+                )}
+              </div>
+              <Space direction="vertical" size="small">
+                <Button
+                  size="small"
+                  icon={<UploadOutlined />}
+                  onClick={() => triggerOwnerPhotoUpload(selectedResidence.residence_id)}
+                >
+                  Upload / replace
+                </Button>
+                {selectedResidence.has_owner_photo && (
+                  <Button size="small" icon={<PictureOutlined />} onClick={() => openOwnerPhotoModal(selectedResidence)}>
+                    View full size
+                  </Button>
+                )}
+                {selectedResidence.has_owner_photo && (
+                  <Popconfirm title="Remove this photo?" onConfirm={() => handleDeleteOwnerPhoto(selectedResidence)}>
+                    <Button size="small" danger icon={<DeleteOutlined />}>
+                      Remove photo
+                    </Button>
+                  </Popconfirm>
+                )}
+              </Space>
+            </div>
 
             <Title level={4} style={{ marginTop: '24px', color: '#262626' }}>
               Related Agreements
@@ -686,6 +929,25 @@ const Residences = () => {
           </Form.Item>
         </Form>
       </Drawer>
+
+      <Modal
+        title={ownerPhotoModalCaption || 'Owner photo'}
+        open={ownerPhotoModalOpen}
+        onCancel={closeOwnerPhotoModal}
+        footer={null}
+        width={480}
+        destroyOnClose
+      >
+        {ownerPhotoModalUrl && (
+          <div style={{ textAlign: 'center' }}>
+            <img
+              src={ownerPhotoModalUrl}
+              alt={ownerPhotoModalCaption}
+              style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }}
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

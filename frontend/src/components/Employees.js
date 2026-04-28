@@ -13,9 +13,14 @@ import {
   Typography,
   Dropdown,
   Card,
+  Checkbox,
+  Modal,
+  Popconfirm,
+  Alert,
 } from 'antd';
-import { PlusOutlined, EditOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined, PictureOutlined, UploadOutlined, DeleteOutlined } from '@ant-design/icons';
 import { employeeAPI, agreementAPI } from '../services/api';
+import api from '../services/api';
 import { exportToPDF, exportTableToExcel } from '../utils/exportUtils';
 import { formatDateForDisplay, formatDateForAPI, parseDateFromAPI, getMinDate, getMaxDate } from '../utils/dateUtils';
 import dayjs from 'dayjs';
@@ -35,6 +40,13 @@ const Employees = () => {
   const [isMobile, setIsMobile] = useState(false);
   const [form] = Form.useForm();
   const tableRef = useRef(null);
+  const employeePhotoInputRef = useRef(null);
+  const currentEmployeePhotoUploadId = useRef(null);
+
+  const [empDrawerPhotoUrl, setEmpDrawerPhotoUrl] = useState(null);
+  const [empPhotoModalOpen, setEmpPhotoModalOpen] = useState(false);
+  const [empPhotoModalUrl, setEmpPhotoModalUrl] = useState(null);
+  const [empPhotoModalCaption, setEmpPhotoModalCaption] = useState('');
 
   // Responsive detection
   useEffect(() => {
@@ -50,6 +62,33 @@ const Employees = () => {
     fetchEmployees();
     fetchAgreements();
   }, []); // Only fetch once on mount, filter handled client-side
+
+  useEffect(() => {
+    if (!formVisible || !selectedEmployee?.employee_id) {
+      setEmpDrawerPhotoUrl(null);
+      return;
+    }
+    if (!selectedEmployee.has_employee_photo) {
+      setEmpDrawerPhotoUrl(null);
+      return;
+    }
+    const urlRef = { current: null };
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get(`/employee/${selectedEmployee.employee_id}/photo`, { responseType: 'blob' });
+        if (cancelled) return;
+        urlRef.current = URL.createObjectURL(res.data);
+        setEmpDrawerPhotoUrl(urlRef.current);
+      } catch {
+        if (!cancelled) setEmpDrawerPhotoUrl(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    };
+  }, [formVisible, selectedEmployee?.employee_id, selectedEmployee?.has_employee_photo]);
 
   const fetchEmployees = async () => {
     setLoading(true);
@@ -119,6 +158,81 @@ const Employees = () => {
       message.error(error.response?.data?.error || 'Failed to save employee');
       // Error handled by message.error above
     }
+  };
+
+  const isValidImageFile = (file) => {
+    if (['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.type)) return true;
+    return /\.(jpe?g|png|webp)$/i.test(file.name);
+  };
+
+  const triggerEmployeePhotoUpload = (employeeId) => {
+    currentEmployeePhotoUploadId.current = employeeId;
+    employeePhotoInputRef.current?.click();
+  };
+
+  const handleEmployeePhotoFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!isValidImageFile(file)) {
+      message.error('Only JPG, JPEG, PNG and WebP images are allowed');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      message.error('Image must be 5MB or smaller');
+      return;
+    }
+    const eid = currentEmployeePhotoUploadId.current;
+    currentEmployeePhotoUploadId.current = null;
+    if (!eid) return;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      await employeeAPI.uploadPhoto(eid, formData);
+      message.success('Employee photo uploaded');
+      await fetchEmployees();
+      if (selectedEmployee?.employee_id === eid) {
+        const res = await employeeAPI.getById(eid);
+        setSelectedEmployee(res.data);
+      }
+    } catch (error) {
+      message.error(error.response?.data?.error || 'Failed to upload photo');
+    }
+  };
+
+  const handleDeleteEmployeePhoto = async (record) => {
+    try {
+      await employeeAPI.deletePhoto(record.employee_id);
+      message.success('Employee photo removed');
+      await fetchEmployees();
+      if (selectedEmployee?.employee_id === record.employee_id) {
+        const res = await employeeAPI.getById(record.employee_id);
+        setSelectedEmployee(res.data);
+      }
+    } catch (error) {
+      message.error(error.response?.data?.error || 'Failed to remove photo');
+    }
+  };
+
+  const openEmployeePhotoModal = async (record) => {
+    const nameParts = [record.employee_first_name, record.employee_last_name, record.employee_sir_name].filter(Boolean);
+    const caption = `${nameParts.join(' ') || 'Employee'} · ${record.employee_id}`;
+    try {
+      const res = await api.get(`/employee/${record.employee_id}/photo`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      setEmpPhotoModalUrl(url);
+      setEmpPhotoModalCaption(caption);
+      setEmpPhotoModalOpen(true);
+    } catch {
+      message.error('Could not load photo');
+    }
+  };
+
+  const closeEmployeePhotoModal = () => {
+    if (empPhotoModalUrl) URL.revokeObjectURL(empPhotoModalUrl);
+    setEmpPhotoModalUrl(null);
+    setEmpPhotoModalOpen(false);
+    setEmpPhotoModalCaption('');
   };
 
   // Filter employees based on search text and status
@@ -264,17 +378,45 @@ const Employees = () => {
       },
     },
     {
+      title: 'Photo',
+      key: 'has_employee_photo',
+      width: 90,
+      align: 'center',
+      render: (_, record) => (
+        <Checkbox
+          checked={!!record.has_employee_photo}
+          disabled
+          title={record.has_employee_photo ? 'Photo on file' : 'No photo uploaded'}
+        />
+      ),
+    },
+    {
       title: 'Actions',
       key: 'actions',
       render: (_, record) => (
-        <Space>
-          <Button
-            type="link"
-            icon={<EditOutlined />}
-            onClick={() => handleEdit(record)}
-          >
+        <Space wrap size="small">
+          <Button type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
             Edit
           </Button>
+          {record.has_employee_photo && (
+            <Button type="link" icon={<PictureOutlined />} onClick={() => openEmployeePhotoModal(record)}>
+              Photo
+            </Button>
+          )}
+          <Button
+            type="link"
+            icon={<UploadOutlined />}
+            onClick={() => triggerEmployeePhotoUpload(record.employee_id)}
+          >
+            Upload photo
+          </Button>
+          {record.has_employee_photo && (
+            <Popconfirm title="Remove employee photo?" onConfirm={() => handleDeleteEmployeePhoto(record)}>
+              <Button type="link" danger icon={<DeleteOutlined />}>
+                Remove
+              </Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -334,10 +476,18 @@ const Employees = () => {
           style={{ width: isMobile ? '100%' : '150px' }}
         >
           <Option value="Active">Show Active</Option>
-          <Option value="Inactive">Show Inactive</Option>
+          <Option value="Inactive">Show Inactive</Option        >
           <Option value="All">Show All</Option>
         </Select>
       </div>
+
+      <input
+        type="file"
+        ref={employeePhotoInputRef}
+        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+        style={{ display: 'none' }}
+        onChange={handleEmployeePhotoFileChange}
+      />
 
       <div ref={tableRef}>
         {isMobile ? (
@@ -369,6 +519,14 @@ const Employees = () => {
                     <div><Text strong>Name: </Text><Text>{fullName}</Text></div>
                     <div><Text strong>Department: </Text><Text>{employee.employee_department || 'N/A'}</Text></div>
                     <div><Text strong>Status: </Text><Tag color={employee.status === 'Active' ? 'green' : 'red'}>{employee.status}</Tag></div>
+                    <div>
+                      <Text strong>Photo on file: </Text>
+                      <Checkbox checked={!!employee.has_employee_photo} disabled />
+                      <Button type="link" size="small" style={{ paddingLeft: 8 }} onClick={() => triggerEmployeePhotoUpload(employee.employee_id)}>Upload</Button>
+                      {employee.has_employee_photo && (
+                        <Button type="link" size="small" onClick={() => openEmployeePhotoModal(employee)}>View</Button>
+                      )}
+                    </div>
                   </Space>
                 </Card>
               );
@@ -412,6 +570,79 @@ const Employees = () => {
         footer={null}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
+          {selectedEmployee ? (
+            <>
+              <Title level={5} style={{ marginTop: 0 }}>Employee photograph</Title>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                {[
+                  selectedEmployee.employee_first_name,
+                  selectedEmployee.employee_last_name,
+                  selectedEmployee.employee_sir_name,
+                ].filter(Boolean).join(' ') || 'Employee'}{' '}
+                · {selectedEmployee.employee_id}
+              </Text>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 24 }}>
+                <div
+                  style={{
+                    width: 120,
+                    height: 120,
+                    borderRadius: 8,
+                    border: '1px solid #d9d9d9',
+                    overflow: 'hidden',
+                    background: '#fafafa',
+                    flexShrink: 0,
+                  }}
+                >
+                  {selectedEmployee.has_employee_photo && empDrawerPhotoUrl ? (
+                    <img
+                      src={empDrawerPhotoUrl}
+                      alt=""
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        height: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#bfbfbf',
+                        fontSize: 12,
+                        padding: 8,
+                        textAlign: 'center',
+                      }}
+                    >
+                      No photo uploaded
+                    </div>
+                  )}
+                </div>
+                <Space direction="vertical" size="small">
+                  <Button size="small" icon={<UploadOutlined />} onClick={() => triggerEmployeePhotoUpload(selectedEmployee.employee_id)}>
+                    Upload / replace
+                  </Button>
+                  {selectedEmployee.has_employee_photo && (
+                    <Button size="small" icon={<PictureOutlined />} onClick={() => openEmployeePhotoModal(selectedEmployee)}>
+                      View full size
+                    </Button>
+                  )}
+                  {selectedEmployee.has_employee_photo && (
+                    <Popconfirm title="Remove this photo?" onConfirm={() => handleDeleteEmployeePhoto(selectedEmployee)}>
+                      <Button size="small" danger icon={<DeleteOutlined />}>
+                        Remove photo
+                      </Button>
+                    </Popconfirm>
+                  )}
+                </Space>
+              </div>
+            </>
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              message="Save the employee first, then you can upload a profile photo from this screen (edit)."
+              style={{ marginBottom: 16 }}
+            />
+          )}
           {!selectedEmployee && (
             <Form.Item name="employee_id" label="Employee ID" rules={[{ required: true }]}>
               <Input placeholder="Alphanumeric employee ID" />
@@ -446,6 +677,25 @@ const Employees = () => {
           </Form.Item>
         </Form>
       </Drawer>
+
+      <Modal
+        title={empPhotoModalCaption || 'Employee photo'}
+        open={empPhotoModalOpen}
+        onCancel={closeEmployeePhotoModal}
+        footer={null}
+        width={480}
+        destroyOnClose
+      >
+        {empPhotoModalUrl && (
+          <div style={{ textAlign: 'center' }}>
+            <img
+              src={empPhotoModalUrl}
+              alt={empPhotoModalCaption}
+              style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }}
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

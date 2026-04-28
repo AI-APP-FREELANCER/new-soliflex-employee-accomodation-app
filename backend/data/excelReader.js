@@ -116,6 +116,9 @@ class ExcelReader {
               processedRow.agreement_advance_due_back = parseFloat(processedRow.agreement_advance_due_back) || 0;
               processedRow.agreement_advance_received = parseFloat(processedRow.agreement_advance_received) || 0;
               processedRow.agreement_maintenance_cut = parseFloat(processedRow.agreement_maintenance_cut) || 0;
+              processedRow.agreement_deduction_electricity = parseFloat(processedRow.agreement_deduction_electricity) || 0;
+              processedRow.agreement_deduction_water = parseFloat(processedRow.agreement_deduction_water) || 0;
+              processedRow.agreement_deduction_other = parseFloat(processedRow.agreement_deduction_other) || 0;
               processedRow.agreement_notice_period_days = processedRow.agreement_notice_period_days != null ? parseInt(processedRow.agreement_notice_period_days, 10) : null;
               processedRow.agreement_notice_due_by_date = this.convertExcelDate(processedRow.agreement_notice_due_by_date) || processedRow.agreement_notice_due_by_date || null;
               processedRow.agreement_statutory_status = processedRow.agreement_statutory_status != null ? String(processedRow.agreement_statutory_status) : null;
@@ -130,8 +133,22 @@ class ExcelReader {
               processedRow.employee_date_of_joining = this.convertExcelDate(processedRow.employee_date_of_joining);
               processedRow.employee_last_working_date = this.convertExcelDate(processedRow.employee_last_working_date) || processedRow.employee_last_working_date || null;
               processedRow.employee_notice_served = processedRow.employee_notice_served === true || processedRow.employee_notice_served === 'Yes' || processedRow.employee_notice_served === 'yes' || false;
+              if (processedRow.employee_photo_ext != null && processedRow.employee_photo_ext !== '') {
+                let e = String(processedRow.employee_photo_ext).toLowerCase().replace(/^\./, '');
+                if (e === 'jpeg') e = 'jpg';
+                processedRow.employee_photo_ext = e;
+              } else {
+                processedRow.employee_photo_ext = '';
+              }
             } else if (sheetName === 'residence_master') {
               processedRow.residence_owner_rating = processedRow.residence_owner_rating != null ? String(processedRow.residence_owner_rating) : null;
+              if (processedRow.residence_owner_photo_ext != null && processedRow.residence_owner_photo_ext !== '') {
+                let e = String(processedRow.residence_owner_photo_ext).toLowerCase().replace(/^\./, '');
+                if (e === 'jpeg') e = 'jpg';
+                processedRow.residence_owner_photo_ext = e;
+              } else {
+                processedRow.residence_owner_photo_ext = '';
+              }
             }
             
             return processedRow;
@@ -294,7 +311,10 @@ class ExcelReader {
     }];
     // Sync legacy status
     residence.residence_status = residence.status === 'active' ? 'Active' : 'Inactive';
-    
+    if (residence.residence_owner_photo_ext == null || residence.residence_owner_photo_ext === '') {
+      residence.residence_owner_photo_ext = '';
+    }
+
     this.data.residence_master.push(residence);
     return residence;
   }
@@ -359,6 +379,11 @@ class ExcelReader {
       if (updates.agreement_maintenance_cut !== undefined) {
         updates.agreement_maintenance_cut = parseFloat(updates.agreement_maintenance_cut) || 0;
       }
+      ['agreement_deduction_electricity', 'agreement_deduction_water', 'agreement_deduction_other'].forEach((k) => {
+        if (updates[k] !== undefined) {
+          updates[k] = parseFloat(updates[k]) || 0;
+        }
+      });
       if (updates.agreement_advance_received !== undefined) {
         updates.agreement_advance_received = parseFloat(updates.agreement_advance_received) || 0;
       }
@@ -418,6 +443,9 @@ class ExcelReader {
     agreementWithDue.agreement_advance_due_back = parseFloat(agreementWithDue.agreement_advance_due_back) || 0;
     agreementWithDue.agreement_advance_received = parseFloat(agreementWithDue.agreement_advance_received) || 0;
     agreementWithDue.agreement_maintenance_cut = parseFloat(agreementWithDue.agreement_maintenance_cut) || 0;
+    agreementWithDue.agreement_deduction_electricity = parseFloat(agreementWithDue.agreement_deduction_electricity) || 0;
+    agreementWithDue.agreement_deduction_water = parseFloat(agreementWithDue.agreement_deduction_water) || 0;
+    agreementWithDue.agreement_deduction_other = parseFloat(agreementWithDue.agreement_deduction_other) || 0;
 
     // Convert vacate date if provided
     if (agreementWithDue.agreement_vacate_date) {
@@ -494,7 +522,10 @@ class ExcelReader {
     }];
     // Sync legacy status
     employee.employee_status = employee.status === 'active' ? 'Active' : 'Inactive';
-    
+    if (employee.employee_photo_ext == null || employee.employee_photo_ext === '') {
+      employee.employee_photo_ext = '';
+    }
+
     this.data.employee_master.push(employee);
     return employee;
   }

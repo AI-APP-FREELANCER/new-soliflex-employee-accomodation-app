@@ -418,28 +418,47 @@ router.post('/:id/revoke-vacate', (req, res) => {
 });
 
 // POST /:id/process-refund - Process advance refund
+// Accepts breakdown: agreement_deduction_electricity, agreement_deduction_water, agreement_deduction_other (sum = total cut)
+// Legacy: agreement_maintenance_cut only (no breakdown fields)
 router.post('/:id/process-refund', (req, res) => {
   try {
     const agreementId = req.params.id;
-    const { agreement_maintenance_cut } = req.body;
-    
-    if (agreement_maintenance_cut === undefined || agreement_maintenance_cut === null) {
-      return res.status(400).json({ error: 'Maintenance cut amount is required' });
-    }
+    const { agreement_maintenance_cut, agreement_deduction_electricity, agreement_deduction_water, agreement_deduction_other } = req.body;
     
     const agreement = excelReader.getAgreements('all').find(a => a.agreement_id === agreementId);
     if (!agreement) return res.status(404).json({ error: 'Agreement not found' });
     
     // Calculate advance due back if not set
     const advanceDueBack = parseFloat(agreement.agreement_advance_due_back || agreement.agreement_advance_amount || 0);
-    const maintenanceCut = parseFloat(agreement_maintenance_cut);
-    
-    if (maintenanceCut < 0) {
-      return res.status(400).json({ error: 'Maintenance cut cannot be negative' });
+
+    const hasBreakdown =
+      agreement_deduction_electricity !== undefined && agreement_deduction_electricity !== null ||
+      agreement_deduction_water !== undefined && agreement_deduction_water !== null ||
+      agreement_deduction_other !== undefined && agreement_deduction_other !== null;
+
+    let maintenanceCut;
+    let electric = 0;
+    let water = 0;
+    let other = 0;
+
+    if (hasBreakdown) {
+      electric = Math.max(0, parseFloat(agreement_deduction_electricity) || 0);
+      water = Math.max(0, parseFloat(agreement_deduction_water) || 0);
+      other = Math.max(0, parseFloat(agreement_deduction_other) || 0);
+      maintenanceCut = electric + water + other;
+    } else {
+      if (agreement_maintenance_cut === undefined || agreement_maintenance_cut === null) {
+        return res.status(400).json({ error: 'Enter deduction amounts (electricity, water, other) or maintenance cut total' });
+      }
+      maintenanceCut = parseFloat(agreement_maintenance_cut);
+      if (isNaN(maintenanceCut) || maintenanceCut < 0) {
+        return res.status(400).json({ error: 'Maintenance cut must be a valid non-negative number' });
+      }
+      // Legacy API: total stored in agreement_maintenance_cut only; line-item fields stay 0
     }
     
     if (maintenanceCut > advanceDueBack) {
-      return res.status(400).json({ error: 'Maintenance cut cannot exceed advance due back amount' });
+      return res.status(400).json({ error: 'Total deductions cannot exceed advance due back amount' });
     }
     
     const advanceReceived = advanceDueBack - maintenanceCut;
@@ -447,6 +466,9 @@ router.post('/:id/process-refund', (req, res) => {
     const updates = {
       agreement_advance_due_back: advanceDueBack,
       agreement_maintenance_cut: maintenanceCut,
+      agreement_deduction_electricity: electric,
+      agreement_deduction_water: water,
+      agreement_deduction_other: other,
       agreement_advance_received: advanceReceived
     };
     

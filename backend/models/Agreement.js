@@ -17,6 +17,9 @@ class Agreement {
     this.agreement_advance_due_back = parseFloat(data.agreement_advance_due_back) || 0;
     this.agreement_advance_received = parseFloat(data.agreement_advance_received) || 0;
     this.agreement_maintenance_cut = parseFloat(data.agreement_maintenance_cut) || 0;
+    this.agreement_deduction_electricity = parseFloat(data.agreement_deduction_electricity) || 0;
+    this.agreement_deduction_water = parseFloat(data.agreement_deduction_water) || 0;
+    this.agreement_deduction_other = parseFloat(data.agreement_deduction_other) || 0;
     // MIS: compliance and notice
     this.agreement_notice_period_days = parseInt(data.agreement_notice_period_days, 10) || null;
     this.agreement_notice_due_by_date = data.agreement_notice_due_by_date || null;

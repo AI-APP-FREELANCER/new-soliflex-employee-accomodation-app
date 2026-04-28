@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Table, Card, Button, Input, Tag, Space, Select, DatePicker, message, Modal, Form, Row, Col, Typography, Empty, Popconfirm } from 'antd';
+import { Table, Card, Button, Input, InputNumber, Tag, Space, Select, DatePicker, message, Modal, Form, Row, Col, Typography, Empty, Popconfirm } from 'antd';
 import { SearchOutlined, PlusOutlined, EditOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, UploadOutlined, CalendarOutlined, DollarOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { agreementAPI, residenceAPI } from '../services/api';
 import apiClient from '../services/api';
@@ -37,8 +37,10 @@ const Agreements = () => {
   const [selectedAgreementForRefund, setSelectedAgreementForRefund] = useState(null);
   const [selectedAgreementForVacate, setSelectedAgreementForVacate] = useState(null);
   const [selectedResidence, setSelectedResidence] = useState(null);
-  const [maintenanceCut, setMaintenanceCut] = useState(0);
   const [refundForm] = Form.useForm();
+  const dedElectric = Form.useWatch('agreement_deduction_electricity', refundForm);
+  const dedWater = Form.useWatch('agreement_deduction_water', refundForm);
+  const dedOther = Form.useWatch('agreement_deduction_other', refundForm);
   const [vacateForm] = Form.useForm();
   
   // Use modern useSearchParams hook for reliable URL parameter reading
@@ -151,83 +153,72 @@ const Agreements = () => {
     return result;
   }, [agreements, searchText, statusFilter, residenceFilter, renewalFilter]);
 
+  const nowrap = { whiteSpace: 'nowrap' };
+
   const columns = [
     {
       title: 'Agreement ID',
       dataIndex: 'agreement_id',
       key: 'agreement_id',
-      render: (text) => <Text strong>{text}</Text>,
+      width: 168,
+      render: (text) => (
+        <Text strong style={nowrap} title={text}>
+          {text}
+        </Text>
+      ),
     },
     {
       title: 'Residence ID',
       dataIndex: 'agreement_residence_id',
       key: 'agreement_residence_id',
+      width: 188,
+      render: (text) => (
+        <span style={nowrap} title={text}>
+          {text || '—'}
+        </span>
+      ),
     },
     {
       title: 'Monthly Rent',
       dataIndex: 'agreement_monthly_rent_amount',
       key: 'agreement_monthly_rent_amount',
-      render: (val) => val ? `₹${Number(val).toLocaleString()}` : '-',
+      width: 128,
+      align: 'right',
+      render: (val) => <span style={nowrap}>{val ? `₹${Number(val).toLocaleString()}` : '-'}</span>,
     },
     {
       title: 'Renewal Date',
       key: 'renewal',
+      width: 220,
       render: (_, record) => {
         if (!record.agreement_renewal_due_date) return <Text type="secondary">N/A</Text>;
         const dateStr = formatDateForDisplay(record.agreement_renewal_due_date);
         
         if (record.computed_renewal_status === 'Past Due') {
-          return <Tag color="red">{dateStr} (Past Due)</Tag>;
+          return <Tag color="red" style={nowrap}>{dateStr} (Past Due)</Tag>;
         }
         if (record.computed_renewal_status === 'Due Soon') {
-          return <Tag color="orange">{dateStr} (Due Soon)</Tag>;
+          return <Tag color="orange" style={nowrap}>{dateStr} (Due Soon)</Tag>;
         }
-        return <Text>{dateStr}</Text>;
+        return <span style={nowrap}>{dateStr}</span>;
       }
     },
     {
       title: 'Status',
       dataIndex: 'agreement_status',
       key: 'agreement_status',
+      width: 100,
+      align: 'center',
       render: (status) => {
         const s = String(status || '').toLowerCase();
-        return <Tag color={s === 'active' ? 'green' : 'default'}>{s === 'active' ? 'Active' : 'Inactive'}</Tag>;
-      },
-    },
-    {
-      title: 'Scheduled to Vacate',
-      key: 'scheduled_to_vacate',
-      render: (_, record) => {
-        const isScheduled = record.agreement_scheduled_to_vacate === true || 
-                           record.agreement_scheduled_to_vacate === 'Yes' || 
-                           record.agreement_scheduled_to_vacate === 'yes';
-        if (isScheduled && record.agreement_vacate_date) {
-          return <Tag color="orange">{formatDateForDisplay(record.agreement_vacate_date)}</Tag>;
-        }
-        return <Text type="secondary">-</Text>;
-      },
-    },
-    {
-      title: 'Advance Status',
-      key: 'advance_status',
-      render: (_, record) => {
-        const advanceReceived = parseFloat(record.agreement_advance_received || 0);
-        const advanceDueBack = parseFloat(record.agreement_advance_due_back || 0);
-        const status = String(record.agreement_status || '').toLowerCase();
-        
-        if (status === 'inactive') {
-          if (advanceReceived > 0) {
-            return <Tag color="green">Received: ₹{advanceReceived.toLocaleString()}</Tag>;
-          } else if (advanceDueBack > 0) {
-            return <Tag color="orange">Due Back: ₹{advanceDueBack.toLocaleString()}</Tag>;
-          }
-        }
-        return <Text type="secondary">-</Text>;
+        return <Tag color={s === 'active' ? 'green' : 'default'} style={nowrap}>{s === 'active' ? 'Active' : 'Inactive'}</Tag>;
       },
     },
     {
       title: 'Attachment',
       key: 'attachment',
+      width: 200,
+      align: 'center',
       render: (_, record) => (
         <Space>
           {record.has_attachment ? (
@@ -263,8 +254,42 @@ const Agreements = () => {
       ),
     },
     {
+      title: 'Scheduled to Vacate',
+      key: 'scheduled_to_vacate',
+      width: 168,
+      render: (_, record) => {
+        const isScheduled = record.agreement_scheduled_to_vacate === true || 
+                           record.agreement_scheduled_to_vacate === 'Yes' || 
+                           record.agreement_scheduled_to_vacate === 'yes';
+        if (isScheduled && record.agreement_vacate_date) {
+          return <Tag color="orange" style={nowrap}>{formatDateForDisplay(record.agreement_vacate_date)}</Tag>;
+        }
+        return <Text type="secondary">-</Text>;
+      },
+    },
+    {
+      title: 'Advance Status',
+      key: 'advance_status',
+      width: 200,
+      render: (_, record) => {
+        const advanceReceived = parseFloat(record.agreement_advance_received || 0);
+        const advanceDueBack = parseFloat(record.agreement_advance_due_back || 0);
+        const status = String(record.agreement_status || '').toLowerCase();
+        
+        if (status === 'inactive') {
+          if (advanceReceived > 0) {
+            return <Tag color="green">Received: ₹{advanceReceived.toLocaleString()}</Tag>;
+          } else if (advanceDueBack > 0) {
+            return <Tag color="orange">Due Back: ₹{advanceDueBack.toLocaleString()}</Tag>;
+          }
+        }
+        return <Text type="secondary">-</Text>;
+      },
+    },
+    {
       title: 'Actions',
       key: 'actions',
+      width: 400,
       render: (_, record) => (
         <Space>
           <Button icon={<EditOutlined />} onClick={() => handleEdit(record)} title="Edit">Edit</Button>
@@ -484,11 +509,17 @@ const Agreements = () => {
       setSelectedResidence(null);
     }
     
-    const advanceDueBack = parseFloat(record.agreement_advance_due_back || record.agreement_advance_amount || 0);
-    const initialMaintenanceCut = parseFloat(record.agreement_maintenance_cut || 0);
-    setMaintenanceCut(initialMaintenanceCut);
+    const e = parseFloat(record.agreement_deduction_electricity) || 0;
+    const w = parseFloat(record.agreement_deduction_water) || 0;
+    const oStored = parseFloat(record.agreement_deduction_other) || 0;
+    const totalCut = parseFloat(record.agreement_maintenance_cut) || 0;
+    const sumBreakdown = e + w + oStored;
+    // Legacy rows: only total cut stored — show entire amount under Other for editing
+    const initialOther = sumBreakdown === 0 && totalCut > 0 ? totalCut : oStored;
     refundForm.setFieldsValue({
-      agreement_maintenance_cut: initialMaintenanceCut
+      agreement_deduction_electricity: e,
+      agreement_deduction_water: w,
+      agreement_deduction_other: initialOther,
     });
     setIsRefundModalVisible(true);
   };
@@ -496,33 +527,32 @@ const Agreements = () => {
   const handleRefundModalOk = async () => {
     try {
       const values = await refundForm.validateFields();
-      const maintenanceCut = parseFloat(values.agreement_maintenance_cut || 0);
-      
-      if (isNaN(maintenanceCut) || maintenanceCut < 0) {
-        message.error('Please enter a valid positive number for maintenance cut');
-        return;
-      }
-      
+      const electric = Math.max(0, parseFloat(values.agreement_deduction_electricity) || 0);
+      const water = Math.max(0, parseFloat(values.agreement_deduction_water) || 0);
+      const other = Math.max(0, parseFloat(values.agreement_deduction_other) || 0);
+      const totalDeductions = electric + water + other;
+
       const advanceDueBack = parseFloat(
         selectedAgreementForRefund.agreement_advance_due_back || 
         selectedAgreementForRefund.agreement_advance_amount || 
         0
       );
-      
-      if (maintenanceCut > advanceDueBack) {
-        message.error('Maintenance cut cannot exceed advance due back amount');
+
+      if (totalDeductions > advanceDueBack) {
+        message.error('Total deductions (electricity + water + other) cannot exceed advance due back amount');
         return;
       }
-      
+
       await agreementAPI.processRefund(selectedAgreementForRefund.agreement_id, {
-        agreement_maintenance_cut: maintenanceCut
+        agreement_deduction_electricity: electric,
+        agreement_deduction_water: water,
+        agreement_deduction_other: other,
       });
       
       message.success('Refund processed successfully');
       setIsRefundModalVisible(false);
       setSelectedAgreementForRefund(null);
       setSelectedResidence(null);
-      setMaintenanceCut(0);
       refundForm.resetFields();
       fetchAgreements();
     } catch (error) {
@@ -536,7 +566,7 @@ const Agreements = () => {
     }
   };
 
-  // Calculate advance returned (for display in refund modal)
+  // Calculate advance returned (for display in refund modal): advance due back − sum of deductions
   const calculateAdvanceReturned = () => {
     if (!selectedAgreementForRefund) return 0;
     const advanceDueBack = parseFloat(
@@ -544,13 +574,27 @@ const Agreements = () => {
       selectedAgreementForRefund.agreement_advance_amount || 
       0
     );
-    return Math.max(0, advanceDueBack - parseFloat(maintenanceCut || 0));
+    const sumDed =
+      (parseFloat(dedElectric) || 0) +
+      (parseFloat(dedWater) || 0) +
+      (parseFloat(dedOther) || 0);
+    return Math.max(0, advanceDueBack - sumDed);
   };
+
+  const totalDeductionsPreview = () =>
+    (parseFloat(dedElectric) || 0) +
+    (parseFloat(dedWater) || 0) +
+    (parseFloat(dedOther) || 0);
 
   return (
     <div style={{ padding: '24px' }}>
-      <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={2}>Agreements Management</Title>
+      <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <Title level={2} style={{ marginBottom: 4 }}>Agreements Management</Title>
+          <Text type="secondary">
+            Upload PDFs in <strong>Attachment</strong>; use <strong>Set to Vacate</strong> / <strong>Revoke</strong> and <strong>Process Refund</strong> in Actions. Scroll the table horizontally if it is wider than the screen.
+          </Text>
+        </div>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={fetchAgreements}>Refresh</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingAgreement(null); form.resetFields(); setIsModalVisible(true); }}>
@@ -629,14 +673,17 @@ const Agreements = () => {
         onChange={handleFileChange}
       />
 
-      <Table
-        columns={columns}
-        dataSource={filteredAgreements}
-        rowKey="agreement_id"
-        loading={loading}
-        pagination={{ pageSize: 10 }}
-        locale={{ emptyText: <Empty description="No agreements found" /> }}
-      />
+      <div style={{ width: '100%', overflowX: 'auto' }}>
+        <Table
+          columns={columns}
+          dataSource={filteredAgreements}
+          rowKey="agreement_id"
+          loading={loading}
+          pagination={{ pageSize: 10 }}
+          scroll={{ x: 2100 }}
+          locale={{ emptyText: <Empty description="No agreements found" /> }}
+        />
+      </div>
 
       {/* PDF View Modal */}
       <Modal
@@ -755,7 +802,6 @@ const Agreements = () => {
           setIsRefundModalVisible(false);
           setSelectedAgreementForRefund(null);
           setSelectedResidence(null);
-          setMaintenanceCut(0);
           refundForm.resetFields();
         }}
         width={700}
@@ -795,59 +841,99 @@ const Agreements = () => {
                 </Col>
               </Row>
             </Card>
+
+            <Card size="small" title="Deductions from advance (pending dues)" style={{ marginBottom: 16 }}>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                Enter amounts to recover from the advance (e.g. electricity, water, other). Total cut is the sum of all three.
+              </Text>
+              <Row gutter={16}>
+                <Col xs={24} sm={8}>
+                  <Form.Item
+                    name="agreement_deduction_electricity"
+                    label="Electricity bill (₹)"
+                    rules={[
+                      {
+                        validator: (_, value) => {
+                          const n = value === undefined || value === null || value === '' ? 0 : Number(value);
+                          if (Number.isNaN(n) || n < 0) {
+                            return Promise.reject(new Error('Must be zero or greater'));
+                          }
+                          return Promise.resolve();
+                        },
+                      },
+                    ]}
+                  >
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      min={0}
+                      precision={2}
+                      prefix="₹"
+                      placeholder="0"
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Form.Item
+                    name="agreement_deduction_water"
+                    label="Water bill (₹)"
+                    rules={[
+                      {
+                        validator: (_, value) => {
+                          const n = value === undefined || value === null || value === '' ? 0 : Number(value);
+                          if (Number.isNaN(n) || n < 0) {
+                            return Promise.reject(new Error('Must be zero or greater'));
+                          }
+                          return Promise.resolve();
+                        },
+                      },
+                    ]}
+                  >
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      min={0}
+                      precision={2}
+                      prefix="₹"
+                      placeholder="0"
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <Form.Item
+                    name="agreement_deduction_other"
+                    label="Other (₹)"
+                    rules={[
+                      {
+                        validator: (_, value) => {
+                          const n = value === undefined || value === null || value === '' ? 0 : Number(value);
+                          if (Number.isNaN(n) || n < 0) {
+                            return Promise.reject(new Error('Must be zero or greater'));
+                          }
+                          return Promise.resolve();
+                        },
+                      },
+                    ]}
+                  >
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      min={0}
+                      precision={2}
+                      prefix="₹"
+                      placeholder="0"
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row style={{ marginTop: 8 }}>
+                <Col span={24}>
+                  <Text strong>Total deductions: </Text>
+                  <Text>₹{totalDeductionsPreview().toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</Text>
+                </Col>
+              </Row>
+            </Card>
             
-            <Form.Item
-              name="agreement_maintenance_cut"
-              label="Maintenance Cut Amount (₹)"
-              rules={[
-                { required: true, message: 'Please enter maintenance cut amount' },
-                {
-                  validator: (_, value) => {
-                    const numValue = parseFloat(value);
-                    if (isNaN(numValue) || numValue < 0) {
-                      return Promise.reject(new Error('Amount must be a positive number'));
-                    }
-                    const advanceDueBack = parseFloat(
-                      selectedAgreementForRefund.agreement_advance_due_back || 
-                      selectedAgreementForRefund.agreement_advance_amount || 
-                      0
-                    );
-                    if (numValue > advanceDueBack) {
-                      return Promise.reject(new Error('Maintenance cut cannot exceed advance due back amount'));
-                    }
-                    return Promise.resolve();
-                  }
-                }
-              ]}
-            >
+            <Form.Item label="Advance due back after deductions">
               <Input 
-                type="number" 
-                prefix="₹" 
-                placeholder="Enter amount deducted by landlord"
-                step="0.01"
-                min="0"
-                onChange={(e) => {
-                  const inputValue = e.target.value;
-                  const value = parseFloat(inputValue) || 0;
-                  setMaintenanceCut(value);
-                  // Update form value to ensure validation works
-                  refundForm.setFieldsValue({
-                    agreement_maintenance_cut: value
-                  });
-                }}
-                onBlur={(e) => {
-                  // Ensure value is set on blur
-                  const value = parseFloat(e.target.value) || 0;
-                  refundForm.setFieldsValue({
-                    agreement_maintenance_cut: value
-                  });
-                }}
-              />
-            </Form.Item>
-            
-            <Form.Item label="Advance Returned (Calculated)">
-              <Input 
-                value={`₹${calculateAdvanceReturned().toLocaleString()}`}
+                value={`₹${calculateAdvanceReturned().toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`}
                 disabled
                 style={{ fontWeight: 'bold', color: '#52c41a' }}
               />

@@ -11,6 +11,10 @@ class Employee {
     // MIS: last working day for 15-day notice and replacement planning
     this.employee_last_working_date = data.employee_last_working_date || null;
     this.employee_notice_served = data.employee_notice_served === true || data.employee_notice_served === 'Yes' || data.employee_notice_served === 'yes' || false;
+    // Optional employee photo: extension when uploaded; file under employee_photos/
+    this.employee_photo_ext = data.employee_photo_ext
+      ? String(data.employee_photo_ext).toLowerCase().replace(/^\./, '')
+      : '';
 
     // Legacy status field (map to new status)
     const legacyStatus = data.employee_status || 'Active';
