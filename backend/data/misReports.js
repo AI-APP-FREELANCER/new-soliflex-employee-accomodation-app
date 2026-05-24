@@ -104,6 +104,36 @@ async function getMISData() {
   const vacantCount = totalProperties - occupiedCount;
   const utilizationPct = totalProperties > 0 ? Math.round((occupiedCount / totalProperties) * 100) : 0;
 
+  // Enhanced KPI stats for the professional dashboard
+  const activeResidences = residences.filter(r => normalizeStatus(r.residence_status || 'active') === 'active').length;
+  const inactiveResidences = totalProperties - activeResidences;
+  const totalRooms = residences.reduce((s, r) => s + (parseInt(r.residence_house_count, 10) || 0), 0);
+  const activeAgreementCount = agreements.filter(a => isAgreementActive(a)).length;
+  const occupiedRooms = activeAgreementCount; // each active agreement = 1 occupied unit
+  const vacantRooms = Math.max(0, totalRooms - occupiedRooms);
+  const roomOccupancyPct = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
+  const vacantResidences = Math.max(0, activeResidences - occupiedCount);
+  const allocatedEmployees = employees.filter(e => isEmployeeActive(e) && e.emplyee_allocated_agreement_id).length;
+  const unallocatedEmployees = Math.max(0, activeEmployees - allocatedEmployees);
+  const leavingIn30Days = employees.filter(e => {
+    const lwd = e.employee_last_working_date ? dayjs(e.employee_last_working_date) : null;
+    return lwd && lwd.isValid() && !lwd.isBefore(today, 'day') && lwd.isBefore(today.add(31, 'day'), 'day');
+  }).length;
+  const leavingIn60Days = employees.filter(e => {
+    const lwd = e.employee_last_working_date ? dayjs(e.employee_last_working_date) : null;
+    return lwd && lwd.isValid() && !lwd.isBefore(today, 'day') && lwd.isBefore(today.add(61, 'day'), 'day');
+  }).length;
+  const leavingIn90Days = employees.filter(e => {
+    const lwd = e.employee_last_working_date ? dayjs(e.employee_last_working_date) : null;
+    return lwd && lwd.isValid() && !lwd.isBefore(today, 'day') && lwd.isBefore(today.add(91, 'day'), 'day');
+  }).length;
+  let totalAdvancePending = 0;
+  agreements.forEach(a => {
+    const dueBack = parseCurrency(a.agreement_advance_due_back || a.agreement_advance_amount || 0);
+    const received = parseCurrency(a.agreement_advance_received || 0);
+    if (dueBack > received) totalAdvancePending += (dueBack - received);
+  });
+
   const ownerSummary = [
     { metric: 'Total Monthly Burn (Rent)', currentValue: totalMonthlyRent, monthOverMonthTrend: '—', actionRequired: '—' },
     { metric: 'System Utilization (%)', currentValue: `${utilizationPct}%`, monthOverMonthTrend: '—', actionRequired: vacantCount > 0 ? `${vacantCount} properties vacant` : '—' },
@@ -114,6 +144,14 @@ async function getMISData() {
     { metric: 'Total Properties', currentValue: totalProperties, monthOverMonthTrend: '—', actionRequired: '—' },
     { metric: 'Active Employees', currentValue: activeEmployees, monthOverMonthTrend: '—', actionRequired: '—' },
     { metric: 'Inactive Employees', currentValue: inactiveEmployees, monthOverMonthTrend: '—', actionRequired: '—' },
+    { metric: 'Active Residences', currentValue: activeResidences, monthOverMonthTrend: '—', actionRequired: inactiveResidences > 0 ? `${inactiveResidences} inactive` : '—' },
+    { metric: 'Occupied Residences', currentValue: occupiedCount, monthOverMonthTrend: '—', actionRequired: vacantResidences > 0 ? `${vacantResidences} active but vacant` : '—' },
+    { metric: 'Total Room Capacity', currentValue: totalRooms, monthOverMonthTrend: '—', actionRequired: `${occupiedRooms} occupied · ${vacantRooms} vacant` },
+    { metric: 'Room Occupancy (%)', currentValue: `${roomOccupancyPct}%`, monthOverMonthTrend: '—', actionRequired: roomOccupancyPct < 70 ? 'Optimize room allocation' : '—' },
+    { metric: 'Allocated Employees', currentValue: allocatedEmployees, monthOverMonthTrend: '—', actionRequired: unallocatedEmployees > 0 ? `${unallocatedEmployees} active employees unallocated` : '—' },
+    { metric: 'Employees Leaving ≤30 Days', currentValue: leavingIn30Days, monthOverMonthTrend: '—', actionRequired: leavingIn30Days > 0 ? 'Urgent — plan accommodation transitions' : '—' },
+    { metric: 'Employees Leaving ≤60 Days', currentValue: leavingIn60Days, monthOverMonthTrend: '—', actionRequired: leavingIn60Days > 0 ? 'Start replacement planning' : '—' },
+    { metric: 'Advance Pending Refund', currentValue: totalAdvancePending, monthOverMonthTrend: '—', actionRequired: totalAdvancePending > 0 ? 'Follow up with landlords' : '—' },
     { metric: 'Report Date', currentValue: today.format('DD-MM-YYYY'), monthOverMonthTrend: '—', actionRequired: '—' },
   ];
 
@@ -525,18 +563,18 @@ async function getMISData() {
     scheduledToVacate,
     refundStatus,
     byOwnerLandlord,
-    // Legacy summary numbers for cards/export if needed
     summary: {
       totalProperties,
-      activeEmployees,
-      inactiveEmployees,
-      totalMonthlyRent,
-      totalAdvanceLocked,
-      totalAdvanceDueBack,
-      totalNetReceived,
-      totalScheduledToVacate,
-      pastDue,
-      dueSoon,
+      activeEmployees, inactiveEmployees,
+      totalMonthlyRent, totalAdvanceLocked, totalAdvanceDueBack, totalNetReceived,
+      totalScheduledToVacate, pastDue, dueSoon,
+      // Enhanced KPIs:
+      activeResidences, inactiveResidences,
+      occupiedResidences: occupiedCount, vacantResidences,
+      totalRooms, occupiedRooms, vacantRooms, roomOccupancyPct, utilizationPct,
+      allocatedEmployees, unallocatedEmployees,
+      leavingIn30Days, leavingIn60Days, leavingIn90Days,
+      totalAdvancePending,
     },
   };
 }
