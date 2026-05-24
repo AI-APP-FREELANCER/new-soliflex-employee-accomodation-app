@@ -1,6 +1,6 @@
 /**
  * MIS Reports - Builds all table data for the dashboard (table-only MIS).
- * Uses excelReader for agreements, employees, residences.
+ * Uses the DB-backed excelReader for agreements, employees, residences.
  */
 const excelReader = require('./excelReader');
 const dayjs = require('dayjs');
@@ -39,11 +39,13 @@ function getResidenceAddressShort(r) {
 /**
  * Returns full MIS payload: ownerSummary, proactive pipeline tables, cost optimization, departmental, financial/compliance, byOwner.
  */
-function getMISData() {
+async function getMISData() {
   const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
-  const agreements = excelReader.getAgreements('all');
-  const employees = excelReader.getEmployees('all');
-  const residences = excelReader.getResidences('all');
+  const [agreements, employees, residences] = await Promise.all([
+    excelReader.getAgreements('all'),
+    excelReader.getEmployees('all'),
+    excelReader.getResidences('all'),
+  ]);
 
   const agreementById = {};
   const residenceById = {};

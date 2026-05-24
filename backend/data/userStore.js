@@ -1,51 +1,27 @@
-const User = require('../models/User');
+const pool = require('./db');
 
-// In-memory user store (in production, this would be a database)
-// Default user for testing: username: admin, password: admin123
-class UserStore {
-  constructor() {
-    this.users = [];
-    this.initialized = false;
-    this.initPromise = this.initializeDefaultUser();
-  }
-
-  async initializeDefaultUser() {
-    if (this.initialized) return;
-    // Create default admin user
-    const hashedPassword = await User.hashPassword('admin123');
-    const defaultUser = new User('user_001', 'admin', hashedPassword, 'ADMIN');
-    this.users.push(defaultUser);
-    this.initialized = true;
-  }
-
-  async ensureInitialized() {
-    if (!this.initialized) {
-      await this.initPromise;
-    }
-  }
-
+const userStore = {
   async findByUsername(username) {
-    await this.ensureInitialized();
-    return this.users.find(u => u.username === username);
-  }
+    const res = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    return res.rows[0] || null;
+  },
 
   async findById(userId) {
-    await this.ensureInitialized();
-    return this.users.find(u => u.user_id === userId);
-  }
+    const res = await pool.query('SELECT * FROM users WHERE user_id = $1', [userId]);
+    return res.rows[0] || null;
+  },
 
   async createUser(username, password, role = 'ADMIN') {
-    await this.ensureInitialized();
-    const hashedPassword = await User.hashPassword(password);
-    const userId = `user_${String(this.users.length + 1).padStart(3, '0')}`;
-    const user = new User(userId, username, hashedPassword, role);
-    this.users.push(user);
-    return user;
-  }
-}
-
-// Singleton instance
-const userStore = new UserStore();
+    const bcrypt  = require('bcryptjs');
+    const hashed  = await bcrypt.hash(password, 10);
+    const count   = await pool.query('SELECT COUNT(*) FROM users');
+    const userId  = `user_${String(parseInt(count.rows[0].count) + 1).padStart(3, '0')}`;
+    const res = await pool.query(
+      'INSERT INTO users (user_id, username, password, role) VALUES ($1,$2,$3,$4) RETURNING *',
+      [userId, username, hashed, role]
+    );
+    return res.rows[0];
+  },
+};
 
 module.exports = userStore;
-

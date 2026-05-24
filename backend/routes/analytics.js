@@ -1,10 +1,10 @@
 const express = require('express');
-const router = express.Router();
+const router  = express.Router();
 const { authenticateToken } = require('../middleware/auth');
 const excelReader = require('../data/excelReader');
 const { getMISData } = require('../data/misReports');
 const dayjs = require('dayjs');
-const utc = require('dayjs/plugin/utc');
+const utc      = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
 
 dayjs.extend(utc);
@@ -12,238 +12,123 @@ dayjs.extend(timezone);
 
 router.use(authenticateToken);
 
-// Helper: Parse currency values safely
 const parseCurrency = (val) => {
   if (val === undefined || val === null || val === '') return 0;
   if (typeof val === 'number') return val;
-  const clean = String(val).replace(/[^\d.-]/g, '');
-  const num = parseFloat(clean);
-  return isNaN(num) ? 0 : num;
+  const n = parseFloat(String(val).replace(/[^\d.-]/g, ''));
+  return isNaN(n) ? 0 : n;
 };
 
-// Helper: Normalize status (case-insensitive)
-// Handles 'ACTIVE', 'Active', 'active', 'INACTIVE', 'Inactive', 'inactive'
 const normalizeStatus = (status) => {
   const s = String(status || '').trim().toLowerCase();
   return s === 'inactive' ? 'inactive' : 'active';
 };
 
-// Helper: Check if employee is active (case-insensitive)
-// Excel stores as 'ACTIVE' or 'INACTIVE' (uppercase)
-const isEmployeeActive = (employee) => {
-  const status = String(employee.employee_status || employee.status || '').trim().toUpperCase();
-  return status === 'ACTIVE';
-};
+const isEmployeeActive = (employee) =>
+  String(employee.employee_status || employee.status || '').trim().toUpperCase() === 'ACTIVE';
 
 // GET / - Main Dashboard Analytics
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    // 1. Fetch ALL Data
-    const agreements = excelReader.getAgreements('all');
-    const employees = excelReader.getEmployees('all');
-    const residences = excelReader.getResidences('all');
+    const [agreements, employees, residences] = await Promise.all([
+      excelReader.getAgreements('all'),
+      excelReader.getEmployees('all'),
+      excelReader.getResidences('all'),
+    ]);
 
-    // 2. Setup IST Date (Start of Today)
-    const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
+    const today          = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
     const ninetyDaysFromNow = today.add(90, 'day');
 
-    // --- CALCULATIONS ---
-
-    // 1. Total Properties Managed
     const totalProperties = residences.length;
 
-    // 2. Employee Status (case-insensitive matching for ACTIVE/INACTIVE)
-    let activeEmployees = 0;
-    let inactiveEmployees = 0;
+    let activeEmployees = 0, inactiveEmployees = 0;
     employees.forEach(e => {
-      // Check employee_status field (Excel stores as 'ACTIVE' or 'INACTIVE')
       const status = String(e.employee_status || e.status || '').trim().toUpperCase();
-      if (status === 'ACTIVE') {
-        activeEmployees++;
-      } else if (status === 'INACTIVE') {
-        inactiveEmployees++;
-      } else {
-        // Default to active if status is missing or invalid (backward compatibility)
-        activeEmployees++;
-      }
+      if (status === 'ACTIVE') activeEmployees++;
+      else if (status === 'INACTIVE') inactiveEmployees++;
+      else activeEmployees++; // default active
     });
 
-    // 3. Renewal Alerts (using IST)
-    let pastDue = 0;
-    let dueSoon = 0;
-
+    let pastDue = 0, dueSoon = 0;
     agreements.forEach(a => {
-      const status = normalizeStatus(a.agreement_status || a.status);
-      if (status !== 'active') return;
-
+      if (normalizeStatus(a.agreement_status || a.status) !== 'active') return;
       const renewalDueDate = a.agreement_renewal_due_date;
       if (!renewalDueDate) return;
-
-      // Parse renewal date with IST
       let dueDate;
       try {
         dueDate = dayjs.tz(renewalDueDate, 'Asia/Kolkata').startOf('day');
-        if (!dueDate.isValid()) {
-          dueDate = dayjs(renewalDueDate, 'YYYY-MM-DD', true).tz('Asia/Kolkata').startOf('day');
-        }
-      } catch (err) {
-        return;
-      }
-
+        if (!dueDate.isValid()) dueDate = dayjs(renewalDueDate, 'YYYY-MM-DD', true).tz('Asia/Kolkata').startOf('day');
+      } catch (e) { return; }
       if (!dueDate.isValid()) return;
-
-      // Check if past due or due soon
-      if (dueDate.isBefore(today, 'day')) {
-        pastDue++;
-      } else if (dueDate.isSame(today, 'day') || dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day')) {
-        dueSoon++;
-      }
+      if (dueDate.isBefore(today, 'day')) pastDue++;
+      else if (dueDate.isSame(today, 'day') || dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day')) dueSoon++;
     });
 
-    // 4. Total Monthly Rent (sum of active agreements)
-    let totalMonthlyRent = 0;
+    let totalMonthlyRent = 0, totalAdvanceLocked = 0, totalAdvanceDueBack = 0, totalNetReceived = 0, totalScheduledToVacate = 0;
     agreements.forEach(a => {
       const status = normalizeStatus(a.agreement_status || a.status);
       if (status === 'active') {
-        totalMonthlyRent += parseCurrency(a.agreement_monthly_rent_amount);
-      }
-    });
-
-    // 5. Total Advance Locked (sum of active agreements)
-    let totalAdvanceLocked = 0;
-    agreements.forEach(a => {
-      const status = normalizeStatus(a.agreement_status || a.status);
-      if (status === 'active') {
+        totalMonthlyRent   += parseCurrency(a.agreement_monthly_rent_amount);
         totalAdvanceLocked += parseCurrency(a.agreement_advance_amount);
       }
-    });
-
-    // 6. Total Advance Due Back (inactive agreements where advance_received is null or 0)
-    let totalAdvanceDueBack = 0;
-    agreements.forEach(a => {
-      const status = normalizeStatus(a.agreement_status || a.status);
       if (status === 'inactive') {
-        const advanceDueBack = parseCurrency(a.agreement_advance_due_back || a.agreement_advance_amount || 0);
-        const advanceReceived = parseCurrency(a.agreement_advance_received || 0);
-        // Only count if not yet received (received is 0 or null)
-        if (advanceReceived === 0 || !a.agreement_advance_received) {
-          totalAdvanceDueBack += advanceDueBack;
-        }
+        const dueBack   = parseCurrency(a.agreement_advance_due_back || a.agreement_advance_amount || 0);
+        const received  = parseCurrency(a.agreement_advance_received || 0);
+        if (received === 0 || !a.agreement_advance_received) totalAdvanceDueBack += dueBack;
       }
+      totalNetReceived += parseCurrency(a.agreement_advance_received || 0);
+      if (a.agreement_scheduled_to_vacate) totalScheduledToVacate++;
     });
 
-    // 7. Total Net Received (sum of actual advance_received from all agreements)
-    let totalNetReceived = 0;
-    agreements.forEach(a => {
-      const advanceReceived = parseCurrency(a.agreement_advance_received || 0);
-      totalNetReceived += advanceReceived;
-    });
-
-    // 8. Total Scheduled to Vacate
-    let totalScheduledToVacate = 0;
-    agreements.forEach(a => {
-      if (a.agreement_scheduled_to_vacate === true || 
-          a.agreement_scheduled_to_vacate === 'Yes' || 
-          a.agreement_scheduled_to_vacate === 'yes') {
-        totalScheduledToVacate++;
-      }
-    });
-
-
-    // 8. Monthly Rent by Department
-    const rentMap = {};
+    // Rent by department
     const agreementRentLookup = {};
-    
-    // Build agreement rent lookup
     agreements.forEach(a => {
-      const status = normalizeStatus(a.agreement_status || a.status);
-      if (status === 'active') {
-        const rent = parseCurrency(a.agreement_monthly_rent_amount);
-        agreementRentLookup[a.agreement_id] = rent;
-      }
+      if (normalizeStatus(a.agreement_status || a.status) === 'active')
+        agreementRentLookup[a.agreement_id] = parseCurrency(a.agreement_monthly_rent_amount);
     });
-
-    // Sum rent by department
+    const rentMap = {};
     employees.forEach(e => {
-      // Use case-insensitive check for employee_status
-      const status = String(e.employee_status || e.status || '').trim().toUpperCase();
-      if (status !== 'ACTIVE') return;
-
+      if (!isEmployeeActive(e)) return;
       const dept = (e.employee_department || 'Unassigned').trim();
       const agId = e.emplyee_allocated_agreement_id;
-
-      if (agId && agreementRentLookup[agId]) {
-        rentMap[dept] = (rentMap[dept] || 0) + agreementRentLookup[agId];
-      }
+      if (agId && agreementRentLookup[agId]) rentMap[dept] = (rentMap[dept] || 0) + agreementRentLookup[agId];
     });
+    const rentByDepartment = Object.keys(rentMap)
+      .map(d => ({ department: d, cost: rentMap[d] }))
+      .sort((a, b) => b.cost - a.cost).slice(0, 4);
 
-    // Format for chart (sort high to low, limit to top 4)
-    const rentByDepartment = Object.keys(rentMap).map(dept => ({
-      department: dept,
-      cost: rentMap[dept]
-    })).sort((a, b) => b.cost - a.cost).slice(0, 4);
-
-    // 9. Employee Breakdown by Department (for chart)
+    // Employee breakdown
     const deptCountMap = {};
     employees.forEach(e => {
-      // Use case-insensitive check for employee_status
-      const status = String(e.employee_status || e.status || '').trim().toUpperCase();
-      if (status === 'ACTIVE') {
+      if (isEmployeeActive(e)) {
         const dept = (e.employee_department || 'Unassigned').trim();
         deptCountMap[dept] = (deptCountMap[dept] || 0) + 1;
       }
     });
+    const employeeBreakdown = Object.keys(deptCountMap)
+      .map(d => ({ department: d, count: deptCountMap[d] }))
+      .sort((a, b) => b.count - a.count).slice(0, 4);
 
-    const employeeBreakdown = Object.keys(deptCountMap).map(dept => ({
-      department: dept,
-      count: deptCountMap[dept]
-    })).sort((a, b) => b.count - a.count).slice(0, 4);
-
-    // Return all dashboard data
     res.json({
-      // Property Stats
       totalProperties,
-      
-      // Employee Stats
-      activeEmployees,
-      inactiveEmployees,
-      totalEmployees: activeEmployees + inactiveEmployees,
-      
-      // Renewal Stats
-      pastDue,
-      dueSoon,
-      currentDateIST: today.format('DD-MM-YYYY'),
-      
-      // Financial Stats
-      totalMonthlyRent,
-      totalAdvanceLocked,
-      totalAdvanceDueBack,
-      totalNetReceived,
-      totalScheduledToVacate,
-      
-      // Chart Data
-      rentByDepartment,
-      employeeBreakdown
+      activeEmployees, inactiveEmployees, totalEmployees: activeEmployees + inactiveEmployees,
+      pastDue, dueSoon, currentDateIST: today.format('DD-MM-YYYY'),
+      totalMonthlyRent, totalAdvanceLocked, totalAdvanceDueBack, totalNetReceived, totalScheduledToVacate,
+      rentByDepartment, employeeBreakdown,
     });
-
   } catch (err) {
-    // Log error securely without exposing details
-    if (process.env.NODE_ENV === 'development') {
-      console.error('Analytics Error:', err.message);
-    }
+    if (process.env.NODE_ENV === 'development') console.error('Analytics Error:', err.message);
     res.status(500).json({ error: 'Server Error processing data' });
   }
 });
 
-// GET /mis - Full MIS table data for dashboard (Owner Summary, Proactive Pipeline, Cost Optimization, Departmental, Financial & Compliance, By Owner)
-router.get('/mis', (req, res) => {
+// GET /mis
+router.get('/mis', async (req, res) => {
   try {
-    const data = getMISData();
+    const data = await getMISData();
     res.json(data);
   } catch (err) {
-    if (process.env.NODE_ENV === 'development') {
-      console.error('MIS Error:', err.message);
-    }
+    if (process.env.NODE_ENV === 'development') console.error('MIS Error:', err.message);
     res.status(500).json({ error: 'Server Error processing MIS data' });
   }
 });
