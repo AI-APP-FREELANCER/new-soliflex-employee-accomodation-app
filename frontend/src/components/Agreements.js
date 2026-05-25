@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Table, Card, Button, Input, InputNumber, Tag, Space, Select, DatePicker, message, Modal, Form, Row, Col, Typography, Empty, Popconfirm } from 'antd';
-import { SearchOutlined, PlusOutlined, EditOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, UploadOutlined, CalendarOutlined, DollarOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { Table, Card, Button, Input, InputNumber, Tag, Space, Select, DatePicker, message, Modal, Form, Row, Col, Typography, Empty, Popconfirm, Badge, Drawer } from 'antd';
+import { SearchOutlined, PlusOutlined, EditOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, UploadOutlined, CalendarOutlined, DollarOutlined, CloseCircleOutlined, FilePdfOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { agreementAPI, residenceAPI } from '../services/api';
 import apiClient from '../services/api';
+import DocumentsPanel from './DocumentsPanel';
 import dayjs from 'dayjs';
 import { formatDateForDisplay } from '../utils/dateUtils';
 import { useSearchParams } from 'react-router-dom';
@@ -30,6 +31,10 @@ const Agreements = () => {
   const [pdfTitle, setPdfTitle] = useState('View PDF Attachment');
   const fileInputRef = useRef(null);
   const currentUploadId = useRef(null);
+
+  // Agreement documents drawer
+  const [docsDrawerOpen, setDocsDrawerOpen]           = useState(false);
+  const [docsDrawerAgreement, setDocsDrawerAgreement] = useState(null);
   
   // Vacate and Refund states
   const [isRefundModalVisible, setIsRefundModalVisible] = useState(false);
@@ -215,42 +220,21 @@ const Agreements = () => {
       },
     },
     {
-      title: 'Attachment',
+      title: 'Documents',
       key: 'attachment',
-      width: 200,
+      width: 160,
       align: 'center',
       render: (_, record) => (
-        <Space>
-          {record.has_attachment ? (
-            <>
-              <Button 
-                icon={<EyeOutlined />} 
-                onClick={() => handleViewPdf(record.agreement_id)}
-                title="View PDF"
-              />
-              <Popconfirm 
-                title="Delete attachment?"
-                description="Are you sure you want to delete this PDF attachment?"
-                onConfirm={() => handleDeletePdf(record.agreement_id)}
-                okText="Yes"
-                cancelText="No"
-              >
-                <Button 
-                  icon={<DeleteOutlined />} 
-                  danger
-                  title="Delete PDF"
-                />
-              </Popconfirm>
-            </>
-          ) : (
-            <Button 
-              icon={<UploadOutlined />} 
-              onClick={() => triggerUpload(record.agreement_id)}
-            >
-              Upload
-            </Button>
-          )}
-        </Space>
+        <Button
+          size="small"
+          icon={<FolderOpenOutlined />}
+          onClick={() => { setDocsDrawerAgreement(record); setDocsDrawerOpen(true); }}
+        >
+          {record.attachment_count > 0
+            ? <Badge count={record.attachment_count} size="small" color="#d46b08" offset={[4, -2]}>PDFs</Badge>
+            : 'Upload PDF'
+          }
+        </Button>
       ),
     },
     {
@@ -685,15 +669,12 @@ const Agreements = () => {
         />
       </div>
 
-      {/* PDF View Modal */}
+      {/* PDF View Modal (legacy single-PDF view) */}
       <Modal
         title={pdfTitle}
         open={isPdfModalVisible}
         onCancel={() => {
-          // Clean up the object URL to prevent memory leaks
-          if (pdfUrl) {
-            URL.revokeObjectURL(pdfUrl);
-          }
+          if (pdfUrl) URL.revokeObjectURL(pdfUrl);
           setIsPdfModalVisible(false);
           setPdfUrl(null);
           setPdfTitle('View PDF Attachment');
@@ -704,17 +685,30 @@ const Agreements = () => {
         bodyStyle={{ height: '80vh', padding: 0 }}
       >
         {pdfUrl && (
-          <iframe
-            src={pdfUrl}
-            style={{
-              width: '100%',
-              height: '100%',
-              border: 'none'
-            }}
-            title="PDF Viewer"
-          />
+          <iframe src={pdfUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="PDF Viewer" />
         )}
       </Modal>
+
+      {/* Agreement Documents Drawer — multi-PDF management */}
+      <Drawer
+        title={docsDrawerAgreement
+          ? `Documents · ${docsDrawerAgreement.agreement_id}`
+          : 'Agreement Documents'}
+        placement="right"
+        width={480}
+        open={docsDrawerOpen}
+        onClose={() => { setDocsDrawerOpen(false); setDocsDrawerAgreement(null); }}
+        footer={null}
+      >
+        {docsDrawerAgreement && (
+          <DocumentsPanel
+            entityType="agreement"
+            entityId={docsDrawerAgreement.agreement_id}
+            docTypes={['agreement_pdf']}
+            onFilesChange={fetchAgreements}
+          />
+        )}
+      </Drawer>
 
       <Modal
         title={editingAgreement ? "Edit Agreement" : "New Agreement"}

@@ -110,6 +110,44 @@ export const employeeAPI = {
   deletePhoto: (id) => api.delete(`/employee/${id}/photo`),
 };
 
+// File management APIs — works for all entity types
+export const filesAPI = {
+  /** List files for an entity, optionally filtered by doc_type */
+  list: (entityType, entityId, docType) =>
+    api.get(`/files/${entityType}/${entityId}${docType ? `?doc_type=${docType}` : ''}`),
+
+  /** Upload a file. docType = 'owner_photo' | 'agreement_pdf' | 'employee_photo' etc. */
+  upload: (entityType, entityId, docType, file, onProgress) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(
+      `/files/${entityType}/${entityId}/upload?doc_type=${docType}`,
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: onProgress,
+      }
+    );
+  },
+
+  /** Stream a file as a Blob */
+  stream: (entityType, entityId, fileId) =>
+    api.get(`/files/${entityType}/${entityId}/${fileId}/stream`, { responseType: 'blob' }),
+
+  /** Delete a file record */
+  delete: (entityType, entityId, fileId) =>
+    api.delete(`/files/${entityType}/${entityId}/${fileId}`),
+};
+
+// Agreement attachment helpers (list + per-file delete)
+export const agreementAttachmentsAPI = {
+  list:   (id)         => api.get(`/agreement/${id}/attachments`),
+  upload: (id, formData) => api.post(`/agreement/${id}/attachment`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }),
+  deleteById: (id, fileId) => api.delete(`/agreement/${id}/attachment/${fileId}`),
+};
+
 // Analytics/Reporting APIs
 export const analyticsAPI = {
   getOccupancy: () => api.get('/analytics/occupancy'),

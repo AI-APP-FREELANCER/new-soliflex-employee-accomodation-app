@@ -44,6 +44,25 @@ async function runStartupMigrations() {
        ADD COLUMN IF NOT EXISTS agreement_deduction_water       NUMERIC(15,2) DEFAULT 0`,
     `ALTER TABLE agreement_master
        ADD COLUMN IF NOT EXISTS agreement_deduction_other       NUMERIC(15,2) DEFAULT 0`,
+
+    // Persistent file storage — tracks every uploaded document on the volume.
+    `CREATE TABLE IF NOT EXISTS file_uploads (
+       file_id         VARCHAR(40) PRIMARY KEY,
+       entity_type     VARCHAR(20)  NOT NULL,
+       entity_id       VARCHAR(100) NOT NULL,
+       doc_type        VARCHAR(50)  NOT NULL,
+       original_name   VARCHAR(500),
+       stored_filename VARCHAR(500) NOT NULL,
+       file_ext        VARCHAR(10)  NOT NULL,
+       file_size_bytes INTEGER,
+       mime_type       VARCHAR(100),
+       uploaded_at     TIMESTAMPTZ  DEFAULT NOW(),
+       sort_order      INTEGER      DEFAULT 0
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_file_uploads_entity
+       ON file_uploads(entity_type, entity_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_file_uploads_doc_type
+       ON file_uploads(entity_type, entity_id, doc_type)`,
   ];
   for (const sql of migrations) {
     await pool.query(sql).catch(() => {}); // ignore if already exists

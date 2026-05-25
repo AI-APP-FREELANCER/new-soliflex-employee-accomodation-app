@@ -17,10 +17,12 @@ import {
   Modal,
   Popconfirm,
   Alert,
+  Tabs,
 } from 'antd';
-import { PlusOutlined, EditOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined, PictureOutlined, UploadOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined, PictureOutlined, UploadOutlined, DeleteOutlined, FolderOutlined } from '@ant-design/icons';
 import { employeeAPI, agreementAPI } from '../services/api';
 import api from '../services/api';
+import DocumentsPanel from './DocumentsPanel';
 import { exportToPDF, exportTableToExcel } from '../utils/exportUtils';
 import { formatDateForDisplay, formatDateForAPI, parseDateFromAPI, getMinDate, getMaxDate } from '../utils/dateUtils';
 import dayjs from 'dayjs';
@@ -559,123 +561,95 @@ const Employees = () => {
 
       {/* Drawer */}
       <Drawer
-        title={selectedEmployee ? 'Edit Employee' : 'Add Employee'}
+        title={selectedEmployee
+          ? `${[selectedEmployee.employee_first_name, selectedEmployee.employee_last_name, selectedEmployee.employee_sir_name].filter(Boolean).join(' ') || selectedEmployee.employee_id}`
+          : 'Add Employee'}
         placement="right"
-        width={isMobile ? '100%' : 500}
-        onClose={() => {
-          setFormVisible(false);
-          form.resetFields();
-        }}
+        width={isMobile ? '100%' : 560}
+        onClose={() => { setFormVisible(false); form.resetFields(); }}
         open={formVisible}
         footer={null}
+        bodyStyle={{ padding: 0 }}
       >
-        <Form form={form} layout="vertical" onFinish={handleSubmit}>
-          {selectedEmployee ? (
-            <>
-              <Title level={5} style={{ marginTop: 0 }}>Employee photograph</Title>
-              <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-                {[
-                  selectedEmployee.employee_first_name,
-                  selectedEmployee.employee_last_name,
-                  selectedEmployee.employee_sir_name,
-                ].filter(Boolean).join(' ') || 'Employee'}{' '}
-                · {selectedEmployee.employee_id}
-              </Text>
-              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 24 }}>
-                <div
-                  style={{
-                    width: 120,
-                    height: 120,
-                    borderRadius: 8,
-                    border: '1px solid #d9d9d9',
-                    overflow: 'hidden',
-                    background: '#fafafa',
-                    flexShrink: 0,
-                  }}
-                >
-                  {selectedEmployee.has_employee_photo && empDrawerPhotoUrl ? (
-                    <img
-                      src={empDrawerPhotoUrl}
-                      alt=""
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        height: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#bfbfbf',
-                        fontSize: 12,
-                        padding: 8,
-                        textAlign: 'center',
-                      }}
-                    >
-                      No photo uploaded
-                    </div>
-                  )}
+        <Tabs
+          defaultActiveKey="details"
+          size="small"
+          tabBarStyle={{ paddingLeft: 16, paddingRight: 16, marginBottom: 0, background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}
+          items={[
+            {
+              key: 'details',
+              label: 'Details',
+              children: (
+                <div style={{ padding: '16px 20px' }}>
+                  <Form form={form} layout="vertical" onFinish={handleSubmit}>
+                    {!selectedEmployee && (
+                      <Alert
+                        type="info"
+                        showIcon
+                        message="Save the employee first, then use the Documents tab to upload photos and documents."
+                        style={{ marginBottom: 16 }}
+                      />
+                    )}
+                    {!selectedEmployee && (
+                      <Form.Item name="employee_id" label="Employee ID" rules={[{ required: true }]}>
+                        <Input placeholder="Alphanumeric employee ID" />
+                      </Form.Item>
+                    )}
+                    <Form.Item name="employee_first_name" label="First Name"><Input /></Form.Item>
+                    <Form.Item name="employee_last_name" label="Last Name"><Input /></Form.Item>
+                    <Form.Item name="employee_department" label="Department"><Input /></Form.Item>
+                    <Form.Item name="employee_designation" label="Designation"><Input /></Form.Item>
+                    <Form.Item name="employee_date_of_joining" label="Date of Joining">
+                      <DatePicker style={{ width: '100%' }} format="DD-MM-YYYY" />
+                    </Form.Item>
+                    <Form.Item name="emplyee_allocated_agreement_id" label="Allocated Agreement ID">
+                      <Select allowClear showSearch>
+                        {activeAgreements.map((a) => (
+                          <Option key={a.agreement_id} value={a.agreement_id}>{a.agreement_id}</Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                    <Form.Item name="status" label="Status" rules={[{ required: true }]}>
+                      <Select>
+                        <Option value="Active">Active</Option>
+                        <Option value="Inactive">Inactive</Option>
+                      </Select>
+                    </Form.Item>
+                    <Form.Item>
+                      <Space>
+                        <Button type="primary" htmlType="submit">{selectedEmployee ? 'Update' : 'Create'}</Button>
+                        <Button onClick={() => setFormVisible(false)}>Cancel</Button>
+                      </Space>
+                    </Form.Item>
+                  </Form>
                 </div>
-                <Space direction="vertical" size="small">
-                  <Button size="small" icon={<UploadOutlined />} onClick={() => triggerEmployeePhotoUpload(selectedEmployee.employee_id)}>
-                    Upload / replace
-                  </Button>
-                  {selectedEmployee.has_employee_photo && (
-                    <Button size="small" icon={<PictureOutlined />} onClick={() => openEmployeePhotoModal(selectedEmployee)}>
-                      View full size
-                    </Button>
-                  )}
-                  {selectedEmployee.has_employee_photo && (
-                    <Popconfirm title="Remove this photo?" onConfirm={() => handleDeleteEmployeePhoto(selectedEmployee)}>
-                      <Button size="small" danger icon={<DeleteOutlined />}>
-                        Remove photo
-                      </Button>
-                    </Popconfirm>
-                  )}
-                </Space>
-              </div>
-            </>
-          ) : (
-            <Alert
-              type="info"
-              showIcon
-              message="Save the employee first, then you can upload a profile photo from this screen (edit)."
-              style={{ marginBottom: 16 }}
-            />
-          )}
-          {!selectedEmployee && (
-            <Form.Item name="employee_id" label="Employee ID" rules={[{ required: true }]}>
-              <Input placeholder="Alphanumeric employee ID" />
-            </Form.Item>
-          )}
-          <Form.Item name="employee_first_name" label="First Name"><Input /></Form.Item>
-          <Form.Item name="employee_last_name" label="Last Name"><Input /></Form.Item>
-          <Form.Item name="employee_department" label="Department"><Input /></Form.Item>
-          <Form.Item name="employee_designation" label="Designation"><Input /></Form.Item>
-          <Form.Item name="employee_date_of_joining" label="Date of Joining">
-            <DatePicker style={{ width: '100%' }} format="DD-MM-YYYY" />
-          </Form.Item>
-          <Form.Item name="emplyee_allocated_agreement_id" label="Allocated Agreement ID">
-            <Select allowClear showSearch>
-              {activeAgreements.map((a) => (
-                <Option key={a.agreement_id} value={a.agreement_id}>{a.agreement_id}</Option>
-              ))}
-            </Select>
-          </Form.Item>
-          {/* UPDATED: Status field maps to 'status' now */}
-          <Form.Item name="status" label="Status" rules={[{ required: true }]}>
-            <Select>
-              <Option value="Active">Active</Option>
-              <Option value="Inactive">Inactive</Option>
-            </Select>
-          </Form.Item>
-          <Form.Item>
-            <Space>
-              <Button type="primary" htmlType="submit">{selectedEmployee ? 'Update' : 'Create'}</Button>
-              <Button onClick={() => setFormVisible(false)}>Cancel</Button>
-            </Space>
-          </Form.Item>
-        </Form>
+              ),
+            },
+            ...(selectedEmployee ? [{
+              key: 'documents',
+              label: (
+                <span>
+                  <FolderOutlined /> Documents
+                </span>
+              ),
+              children: (
+                <div style={{ padding: '16px 20px' }}>
+                  <DocumentsPanel
+                    entityType="employee"
+                    entityId={selectedEmployee.employee_id}
+                    docTypes={['employee_photo', 'aadhar_front', 'aadhar_back', 'company_agreement', 'other_document']}
+                    onFilesChange={() => {
+                      fetchEmployees();
+                      employeeAPI.getById(selectedEmployee.employee_id)
+                        .then(r => setSelectedEmployee(r.data))
+                        .catch(() => {});
+                    }}
+                  />
+                </div>
+              ),
+            }] : []),
+          ]}
+        />
       </Drawer>
 
       <Modal

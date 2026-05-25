@@ -2,53 +2,56 @@ const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
 const multer  = require('multer');
+const crypto  = require('crypto');
 const router  = express.Router();
+
 const { authenticateToken } = require('../middleware/auth');
 const excelReader = require('../data/excelReader');
+const pool = require('../data/db');
 const {
-  EMPLOYEE_PHOTOS_DIR,
-  ALLOWED_MIMES,
-  ensureDirs,
-  normalizeStoredExt,
-  removeOtherExtensions,
-  resolveExistingPhoto,
-  hasPhotoOnDisk,
-} = require('../utils/photoStorage');
+  DOC_TYPES,
+  getAllowedMimes,
+  getMaxFileSizeBytes,
+  ensureEntityDir,
+  generateStoredFilename,
+  resolveFilePath,
+  contentTypeForExt,
+} = require('../utils/fileStorage');
 
 router.use(authenticateToken);
-ensureDirs();
 
-function enrichEmployeePhoto(emp) {
-  const ext = normalizeStoredExt(emp.employee_photo_ext);
-  const has_employee_photo = hasPhotoOnDisk(EMPLOYEE_PHOTOS_DIR, emp.employee_id, ext);
-  return { ...emp, employee_photo_ext: ext, has_employee_photo };
+// ─── Enrichment helpers ────────────────────────────────────────────────────────
+
+async function employeePhotoCount(employeeId) {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM file_uploads WHERE entity_type='employee' AND entity_id=$1 AND doc_type='employee_photo' LIMIT 1`,
+    [employeeId]
+  );
+  return rows.length > 0;
 }
 
-const uploadEmployeePhoto = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => { ensureDirs(); cb(null, EMPLOYEE_PHOTOS_DIR); },
-    filename:    (req, file, cb) => {
-      const ext = ALLOWED_MIMES[file.mimetype];
-      if (!ext) return cb(new Error('Invalid image type'));
-      cb(null, `${req.params.id}.${ext}`);
-    },
-  }),
-  limits:     { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (ALLOWED_MIMES[file.mimetype]) cb(null, true);
-    else cb(new Error('Only JPG, JPEG, PNG and WebP images are allowed'));
-  },
-});
+async function enrichEmployeeList(employees) {
+  if (!employees.length) return employees;
+  const { rows } = await pool.query(
+    `SELECT entity_id FROM file_uploads WHERE entity_type='employee' AND doc_type='employee_photo'`
+  );
+  const withPhoto = new Set(rows.map(r => r.entity_id));
+  return employees.map(emp => toFrontend({ ...emp, has_employee_photo: withPhoto.has(emp.employee_id) }));
+}
 
-// Normalize for frontend (Active/Inactive display)
+async function enrichEmployee(emp) {
+  const has = await employeePhotoCount(emp.employee_id);
+  return toFrontend({ ...emp, has_employee_photo: has });
+}
+
+// ─── Status normalizers ───────────────────────────────────────────────────────
+
 const toFrontend = (emp) => {
-  const enriched  = enrichEmployeePhoto(emp);
-  const isInactive = String(enriched.employee_status || '').trim().toUpperCase() === 'INACTIVE';
+  const isInactive    = String(emp.employee_status || '').trim().toUpperCase() === 'INACTIVE';
   const displayStatus = isInactive ? 'Inactive' : 'Active';
-  return { ...enriched, status: displayStatus, employee_status: displayStatus };
+  return { ...emp, status: displayStatus, employee_status: displayStatus };
 };
 
-// Normalize for DB write (ACTIVE/INACTIVE uppercase)
 const toBackend = (data) => {
   const inputStatus   = data.status || data.employee_status || 'Active';
   const storageStatus = String(inputStatus).trim().toUpperCase() === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
@@ -58,141 +61,178 @@ const toBackend = (data) => {
   return { ...rest, employee_status: storageStatus, status: storageStatus };
 };
 
-// Photo routes
+// ─── Employee photo uploader factory ─────────────────────────────────────────
+
+function employeePhotoUploader(employeeId) {
+  const docType      = DOC_TYPES.EMPLOYEE_PHOTO;
+  const allowedMimes = getAllowedMimes(docType);
+  return multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => {
+        try   { cb(null, ensureEntityDir('employee', employeeId)); }
+        catch (e) { cb(e); }
+      },
+      filename: (req, file, cb) => {
+        const ext = allowedMimes[file.mimetype];
+        if (!ext) return cb(new Error('Only JPG, PNG, WebP images are allowed'));
+        cb(null, generateStoredFilename(docType, ext));
+      },
+    }),
+    limits:     { fileSize: getMaxFileSizeBytes(docType) },
+    fileFilter: (req, file, cb) => {
+      if (allowedMimes[file.mimetype]) cb(null, true);
+      else cb(new Error('Only JPG, JPEG, PNG and WebP images are allowed'));
+    },
+  });
+}
+
+// ─── Employee photo routes ────────────────────────────────────────────────────
+
 router.get('/:id/photo', async (req, res) => {
   try {
-    const employees = await excelReader.getEmployees('all');
-    const employee  = employees.find(e => e.employee_id === req.params.id);
-    if (!employee) return res.status(404).json({ error: 'Employee not found' });
-    const ext      = normalizeStoredExt(employee.employee_photo_ext);
-    const resolved = resolveExistingPhoto(EMPLOYEE_PHOTOS_DIR, req.params.id, ext);
-    if (!resolved) return res.status(404).json({ error: 'Photo not found' });
-    res.setHeader('Content-Type', resolved.contentType);
-    res.setHeader('Content-Disposition', `inline; filename="${req.params.id}${path.extname(resolved.filePath)}"`);
-    fs.createReadStream(resolved.filePath).pipe(res);
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error streaming employee photo:', error.message);
+    const { rows } = await pool.query(
+      `SELECT * FROM file_uploads WHERE entity_type='employee' AND entity_id=$1
+         AND doc_type='employee_photo' ORDER BY uploaded_at DESC LIMIT 1`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'No employee photo on file' });
+    const record   = rows[0];
+    const filePath = resolveFilePath('employee', req.params.id, record.stored_filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Photo file not found on disk' });
+    res.setHeader('Content-Type', contentTypeForExt(record.file_ext));
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(record.stored_filename)}"`);
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-router.post('/:id/photo', uploadEmployeePhoto.single('file'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const ext = ALLOWED_MIMES[req.file.mimetype];
-    if (!ext)  return res.status(400).json({ error: 'Invalid image type' });
-
-    const employees = await excelReader.getEmployees('all');
-    const employee  = employees.find(e => e.employee_id === req.params.id);
-    if (!employee) {
-      const orphan = path.join(EMPLOYEE_PHOTOS_DIR, req.file.filename);
-      if (fs.existsSync(orphan)) fs.unlinkSync(orphan);
-      return res.status(404).json({ error: 'Employee not found' });
+router.post('/:id/photo', async (req, res) => {
+  const employeeId = req.params.id;
+  employeePhotoUploader(employeeId).single('file')(req, res, async (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'File size exceeds 5MB limit' });
+      return res.status(400).json({ error: err.message });
     }
-
-    removeOtherExtensions(EMPLOYEE_PHOTOS_DIR, req.params.id, ext);
-    const updated = await excelReader.updateEmployee(req.params.id, { employee_photo_ext: ext });
-    res.json(toFrontend(updated));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error uploading employee photo:', error.message);
-    if (error.message && error.message.includes('Only JPG'))
-      return res.status(400).json({ error: error.message });
-    if (error.code === 'LIMIT_FILE_SIZE')
-      return res.status(400).json({ error: 'File size exceeds 5MB limit' });
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    try {
+      const employees = await excelReader.getEmployees('all');
+      const employee  = employees.find(e => e.employee_id === employeeId);
+      if (!employee) {
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(404).json({ error: 'Employee not found' });
+      }
+      // Replace existing photo
+      const { rows: old } = await pool.query(
+        `SELECT * FROM file_uploads WHERE entity_type='employee' AND entity_id=$1 AND doc_type='employee_photo'`,
+        [employeeId]
+      );
+      for (const o of old) {
+        const fp = resolveFilePath('employee', employeeId, o.stored_filename);
+        if (fs.existsSync(fp)) fs.unlinkSync(fp);
+        await pool.query('DELETE FROM file_uploads WHERE file_id=$1', [o.file_id]);
+      }
+      const allowedMimes = getAllowedMimes(DOC_TYPES.EMPLOYEE_PHOTO);
+      const ext    = allowedMimes[req.file.mimetype];
+      const fileId = crypto.randomBytes(16).toString('hex');
+      await pool.query(
+        `INSERT INTO file_uploads
+           (file_id, entity_type, entity_id, doc_type, original_name, stored_filename, file_ext, file_size_bytes, mime_type)
+         VALUES ($1,'employee',$2,'employee_photo',$3,$4,$5,$6,$7)`,
+        [fileId, employeeId, req.file.originalname, req.file.filename, ext, req.file.size, req.file.mimetype]
+      );
+      const updated = await excelReader.updateEmployee(employeeId, { employee_photo_ext: ext });
+      res.json(toFrontend({ ...updated, has_employee_photo: true }));
+    } catch (dbErr) {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      res.status(500).json({ error: 'Failed to save file record' });
+    }
+  });
 });
 
 router.delete('/:id/photo', async (req, res) => {
   try {
-    const employees = await excelReader.getEmployees('all');
-    const employee  = employees.find(e => e.employee_id === req.params.id);
-    if (!employee) return res.status(404).json({ error: 'Employee not found' });
-    ['jpg', 'jpeg', 'png', 'webp'].forEach(e => {
-      const p = path.join(EMPLOYEE_PHOTOS_DIR, `${req.params.id}.${e}`);
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    });
-    const updated = await excelReader.updateEmployee(req.params.id, { employee_photo_ext: '' });
-    res.json(toFrontend(updated));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error deleting employee photo:', error.message);
+    const employeeId = req.params.id;
+    const { rows } = await pool.query(
+      `SELECT * FROM file_uploads WHERE entity_type='employee' AND entity_id=$1 AND doc_type='employee_photo'`,
+      [employeeId]
+    );
+    for (const rec of rows) {
+      const fp = resolveFilePath('employee', employeeId, rec.stored_filename);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      await pool.query('DELETE FROM file_uploads WHERE file_id=$1', [rec.file_id]);
+    }
+    const updated = await excelReader.updateEmployee(employeeId, { employee_photo_ext: '' });
+    res.json(toFrontend({ ...updated, has_employee_photo: false }));
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET all
+// ─── CRUD routes ───────────────────────────────────────────────────────────────
+
 router.get('/', async (req, res) => {
   try {
     let employees = await excelReader.getEmployees('all');
-    employees = employees.map(toFrontend);
+    const enriched = await enrichEmployeeList(employees);
     if (req.query.status && req.query.status.toLowerCase() !== 'all') {
       const target = req.query.status.trim().toLowerCase();
-      employees = employees.filter(e => e.status.toLowerCase() === target);
+      return res.json(enriched.filter(e => e.status.toLowerCase() === target));
     }
-    res.json(employees);
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error fetching employees:', error.message);
+    res.json(enriched);
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET by ID
+router.get('/residence/:residenceId', async (req, res) => {
+  try {
+    const employees = await excelReader.getEmployees('all');
+    const filtered  = employees.filter(e => e.residence_id === req.params.residenceId);
+    res.json(await enrichEmployeeList(filtered));
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const employees = await excelReader.getEmployees('all');
     const employee  = employees.find(e => e.employee_id === req.params.id);
     if (!employee) return res.status(404).json({ error: 'Employee not found' });
-    res.json(toFrontend(employee));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error fetching employee:', error.message);
+    res.json(await enrichEmployee(employee));
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET by residence (legacy route)
-router.get('/residence/:residenceId', async (req, res) => {
-  try {
-    const employees = await excelReader.getEmployees('all');
-    res.json(employees.filter(e => e.residence_id === req.params.residenceId).map(toFrontend));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error fetching employees by residence:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// POST create
 router.post('/', async (req, res) => {
   try {
-    const payload      = toBackend(req.body);
-    const newEmployee  = await excelReader.addEmployee(payload);
-    res.status(201).json(toFrontend(newEmployee));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error creating employee:', error.message);
+    const payload     = toBackend(req.body);
+    const newEmployee = await excelReader.addEmployee(payload);
+    res.status(201).json(toFrontend({ ...newEmployee, has_employee_photo: false }));
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// PUT update
 router.put('/:id', async (req, res) => {
   try {
     const payload = toBackend(req.body);
     const updated = await excelReader.updateEmployee(req.params.id, payload);
     if (!updated) return res.status(404).json({ error: 'Employee not found' });
-    res.json(toFrontend(updated));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error updating employee:', error.message);
+    res.json(await enrichEmployee(updated));
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// DELETE
 router.delete('/:id', async (req, res) => {
   try {
     const deleted = await excelReader.deleteEmployee(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Employee not found' });
     res.json({ message: 'Employee deleted successfully' });
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error deleting employee:', error.message);
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });

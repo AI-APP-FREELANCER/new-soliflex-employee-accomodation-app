@@ -1,133 +1,178 @@
 const express = require('express');
-const path = require('path');
-const fs = require('fs');
-const multer = require('multer');
-const router = express.Router();
+const path    = require('path');
+const fs      = require('fs');
+const multer  = require('multer');
+const crypto  = require('crypto');
+const router  = express.Router();
+
 const { authenticateToken } = require('../middleware/auth');
 const excelReader = require('../data/excelReader');
+const pool = require('../data/db');
 const {
-  OWNER_PHOTOS_DIR,
-  ALLOWED_MIMES,
-  ensureDirs,
-  normalizeStoredExt,
-  removeOtherExtensions,
-  resolveExistingPhoto,
-  hasPhotoOnDisk,
-} = require('../utils/photoStorage');
+  DOC_TYPES,
+  getAllowedMimes,
+  getMaxFileSizeBytes,
+  ensureEntityDir,
+  generateStoredFilename,
+  resolveFilePath,
+  contentTypeForExt,
+} = require('../utils/fileStorage');
 
 router.use(authenticateToken);
-ensureDirs();
 
-function enrichResidence(r) {
-  const ext = normalizeStoredExt(r.residence_owner_photo_ext);
-  const has_owner_photo = hasPhotoOnDisk(OWNER_PHOTOS_DIR, r.residence_id, ext);
-  return { ...r, residence_owner_photo_ext: ext, has_owner_photo };
+// ─── Enrichment helpers ────────────────────────────────────────────────────────
+
+/** Bulk enrichment for list: single DB round-trip. */
+async function enrichResidenceList(residences) {
+  if (!residences.length) return residences;
+  const { rows } = await pool.query(
+    `SELECT entity_id FROM file_uploads WHERE entity_type='residence' AND doc_type='owner_photo'`
+  );
+  const withPhoto = new Set(rows.map(r => r.entity_id));
+  return residences.map(r => ({ ...r, has_owner_photo: withPhoto.has(r.residence_id) }));
 }
 
-const uploadOwnerPhoto = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => { ensureDirs(); cb(null, OWNER_PHOTOS_DIR); },
-    filename:    (req, file, cb) => {
-      const ext = ALLOWED_MIMES[file.mimetype];
-      if (!ext) return cb(new Error('Invalid image type'));
-      cb(null, `${req.params.id}.${ext}`);
-    },
-  }),
-  limits:     { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (ALLOWED_MIMES[file.mimetype]) cb(null, true);
-    else cb(new Error('Only JPG, JPEG, PNG and WebP images are allowed'));
-  },
-});
+/** Single-record enrichment. */
+async function enrichResidence(r) {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM file_uploads WHERE entity_type='residence' AND entity_id=$1 AND doc_type='owner_photo' LIMIT 1`,
+    [r.residence_id]
+  );
+  return { ...r, has_owner_photo: rows.length > 0 };
+}
 
-// --- Owner photo ---
+// ─── Owner photo uploader factory ────────────────────────────────────────────
+
+function ownerPhotoUploader(residenceId) {
+  const docType      = DOC_TYPES.OWNER_PHOTO;
+  const allowedMimes = getAllowedMimes(docType);
+  return multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => {
+        try   { cb(null, ensureEntityDir('residence', residenceId)); }
+        catch (e) { cb(e); }
+      },
+      filename: (req, file, cb) => {
+        const ext = allowedMimes[file.mimetype];
+        if (!ext) return cb(new Error('Only JPG, PNG, WebP images are allowed'));
+        cb(null, generateStoredFilename(docType, ext));
+      },
+    }),
+    limits:     { fileSize: getMaxFileSizeBytes(docType) },
+    fileFilter: (req, file, cb) => {
+      if (allowedMimes[file.mimetype]) cb(null, true);
+      else cb(new Error('Only JPG, JPEG, PNG and WebP images are allowed'));
+    },
+  });
+}
+
+// ─── Owner photo routes ────────────────────────────────────────────────────────
+
 router.get('/:id/owner-photo', async (req, res) => {
   try {
-    const residences = await excelReader.getResidences('all');
-    const residence  = residences.find(r => r.residence_id === req.params.id);
-    if (!residence) return res.status(404).json({ error: 'Residence not found' });
-    const ext      = normalizeStoredExt(residence.residence_owner_photo_ext);
-    const resolved = resolveExistingPhoto(OWNER_PHOTOS_DIR, req.params.id, ext);
-    if (!resolved) return res.status(404).json({ error: 'Photo not found' });
-    res.setHeader('Content-Type', resolved.contentType);
-    res.setHeader('Content-Disposition', `inline; filename="${req.params.id}${path.extname(resolved.filePath)}"`);
-    fs.createReadStream(resolved.filePath).pipe(res);
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error streaming owner photo:', error.message);
+    const { rows } = await pool.query(
+      `SELECT * FROM file_uploads WHERE entity_type='residence' AND entity_id=$1
+         AND doc_type='owner_photo' ORDER BY uploaded_at DESC LIMIT 1`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'No owner photo on file' });
+    const record   = rows[0];
+    const filePath = resolveFilePath('residence', req.params.id, record.stored_filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Photo file not found on disk' });
+    res.setHeader('Content-Type', contentTypeForExt(record.file_ext));
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(record.stored_filename)}"`);
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-router.post('/:id/owner-photo', uploadOwnerPhoto.single('file'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const ext = ALLOWED_MIMES[req.file.mimetype];
-    if (!ext)  return res.status(400).json({ error: 'Invalid image type' });
-
-    const residences = await excelReader.getResidences('all');
-    const residence  = residences.find(r => r.residence_id === req.params.id);
-    if (!residence) {
-      const orphan = path.join(OWNER_PHOTOS_DIR, req.file.filename);
-      if (fs.existsSync(orphan)) fs.unlinkSync(orphan);
-      return res.status(404).json({ error: 'Residence not found' });
+router.post('/:id/owner-photo', async (req, res) => {
+  const residenceId = req.params.id;
+  ownerPhotoUploader(residenceId).single('file')(req, res, async (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'File size exceeds 5MB limit' });
+      return res.status(400).json({ error: err.message });
     }
-
-    removeOtherExtensions(OWNER_PHOTOS_DIR, req.params.id, ext);
-    const updated = await excelReader.updateResidence(req.params.id, { residence_owner_photo_ext: ext });
-    res.json(enrichResidence(updated));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error uploading owner photo:', error.message);
-    if (error.message && error.message.includes('Only JPG'))
-      return res.status(400).json({ error: error.message });
-    if (error.code === 'LIMIT_FILE_SIZE')
-      return res.status(400).json({ error: 'File size exceeds 5MB limit' });
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    try {
+      const residences = await excelReader.getResidences('all');
+      const residence  = residences.find(r => r.residence_id === residenceId);
+      if (!residence) {
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(404).json({ error: 'Residence not found' });
+      }
+      // Replace any existing owner photo
+      const { rows: old } = await pool.query(
+        `SELECT * FROM file_uploads WHERE entity_type='residence' AND entity_id=$1 AND doc_type='owner_photo'`,
+        [residenceId]
+      );
+      for (const o of old) {
+        const fp = resolveFilePath('residence', residenceId, o.stored_filename);
+        if (fs.existsSync(fp)) fs.unlinkSync(fp);
+        await pool.query('DELETE FROM file_uploads WHERE file_id=$1', [o.file_id]);
+      }
+      // Insert new DB record
+      const allowedMimes = getAllowedMimes(DOC_TYPES.OWNER_PHOTO);
+      const ext    = allowedMimes[req.file.mimetype];
+      const fileId = crypto.randomBytes(16).toString('hex');
+      await pool.query(
+        `INSERT INTO file_uploads
+           (file_id, entity_type, entity_id, doc_type, original_name, stored_filename, file_ext, file_size_bytes, mime_type)
+         VALUES ($1,'residence',$2,'owner_photo',$3,$4,$5,$6,$7)`,
+        [fileId, residenceId, req.file.originalname, req.file.filename, ext, req.file.size, req.file.mimetype]
+      );
+      const updated = await excelReader.updateResidence(residenceId, { residence_owner_photo_ext: ext });
+      res.json({ ...updated, has_owner_photo: true });
+    } catch (dbErr) {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      res.status(500).json({ error: 'Failed to save file record' });
+    }
+  });
 });
 
 router.delete('/:id/owner-photo', async (req, res) => {
   try {
-    const residences = await excelReader.getResidences('all');
-    const residence  = residences.find(r => r.residence_id === req.params.id);
-    if (!residence) return res.status(404).json({ error: 'Residence not found' });
-    ['jpg', 'jpeg', 'png', 'webp'].forEach(e => {
-      const p = path.join(OWNER_PHOTOS_DIR, `${req.params.id}.${e}`);
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    });
-    const updated = await excelReader.updateResidence(req.params.id, { residence_owner_photo_ext: '' });
-    res.json(enrichResidence(updated));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error deleting owner photo:', error.message);
+    const residenceId = req.params.id;
+    const { rows } = await pool.query(
+      `SELECT * FROM file_uploads WHERE entity_type='residence' AND entity_id=$1 AND doc_type='owner_photo'`,
+      [residenceId]
+    );
+    for (const rec of rows) {
+      const fp = resolveFilePath('residence', residenceId, rec.stored_filename);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      await pool.query('DELETE FROM file_uploads WHERE file_id=$1', [rec.file_id]);
+    }
+    const updated = await excelReader.updateResidence(residenceId, { residence_owner_photo_ext: '' });
+    res.json({ ...updated, has_owner_photo: false });
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET all
+// ─── CRUD routes ───────────────────────────────────────────────────────────────
+
 router.get('/', async (req, res) => {
   try {
     const statusFilter = req.query.status || 'active';
     const residences   = await excelReader.getResidences(statusFilter);
-    res.json(residences.map(enrichResidence));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error fetching residences:', error.message);
+    res.json(await enrichResidenceList(residences));
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET by ID
 router.get('/:id', async (req, res) => {
   try {
     const residences = await excelReader.getResidences('all');
     const residence  = residences.find(r => r.residence_id === req.params.id);
     if (!residence) return res.status(404).json({ error: 'Residence not found' });
-    res.json(enrichResidence(residence));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error fetching residence:', error.message);
+    res.json(await enrichResidence(residence));
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// POST create
 router.post('/', async (req, res) => {
   try {
     const data = { ...req.body };
@@ -140,14 +185,12 @@ router.post('/', async (req, res) => {
     }
     if (!data.residence_status) data.residence_status = 'active';
     const newResidence = await excelReader.addResidence(data);
-    res.status(201).json(enrichResidence(newResidence));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error creating residence:', error.message);
+    res.status(201).json(await enrichResidence(newResidence));
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// PUT update
 router.put('/:id', async (req, res) => {
   try {
     const updates = { ...req.body };
@@ -156,22 +199,19 @@ router.put('/:id', async (req, res) => {
     delete updates.has_owner_photo;
     const updated = await excelReader.updateResidence(req.params.id, updates);
     if (!updated) return res.status(404).json({ error: 'Residence not found' });
-    res.json(enrichResidence(updated));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error updating residence:', error.message);
+    res.json(await enrichResidence(updated));
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// PATCH deactivate
 router.patch('/:id/deactivate', async (req, res) => {
   try {
-    const reason     = req.body.reason || 'Marked inactive by user';
+    const reason      = req.body.reason || 'Marked inactive by user';
     const deactivated = await excelReader.deactivateResidence(req.params.id, reason);
     if (!deactivated) return res.status(404).json({ error: 'Residence not found' });
-    res.json(enrichResidence(deactivated));
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') console.error('Error deactivating residence:', error.message);
+    res.json(await enrichResidence(deactivated));
+  } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });

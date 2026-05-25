@@ -19,10 +19,13 @@ import {
   Checkbox,
   Modal,
   Popconfirm,
+  Tabs,
+  Divider,
 } from 'antd';
-import { PlusOutlined, EditOutlined, EyeOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined, PictureOutlined, UploadOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, EyeOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined, PictureOutlined, UploadOutlined, DeleteOutlined, FolderOutlined } from '@ant-design/icons';
 import { residenceAPI, agreementAPI, employeeAPI } from '../services/api';
 import api from '../services/api';
+import DocumentsPanel from './DocumentsPanel';
 import { exportToPDF, exportTableToExcel } from '../utils/exportUtils';
 import { formatDateForDisplay } from '../utils/dateUtils';
 import dayjs from 'dayjs';
@@ -651,167 +654,106 @@ const Residences = () => {
 
       {/* View Details Drawer */}
       <Drawer
-        title="Residence Details"
+        title={selectedResidence
+          ? `${selectedResidence.residence_owner_name || ''} · ${selectedResidence.residence_id}`
+          : 'Residence Details'}
         placement="right"
-        width={isMobile ? '100%' : 600}
+        width={isMobile ? '100%' : 640}
         onClose={() => setDrawerVisible(false)}
         open={drawerVisible}
+        bodyStyle={{ padding: 0 }}
       >
         {selectedResidence && (
-          <>
-            <Descriptions title="Residence Information" bordered column={1}>
-              <Descriptions.Item label="Residence ID">
-                {selectedResidence.residence_id}
-              </Descriptions.Item>
-              <Descriptions.Item label="Owner ID">
-                {selectedResidence.residence_owner_id || 'N/A'}
-              </Descriptions.Item>
-              <Descriptions.Item label="Owner Name">
-                {selectedResidence.residence_owner_name || 'N/A'}
-              </Descriptions.Item>
-              <Descriptions.Item label="Door Number">
-                {selectedResidence.residence_door_number || 'N/A'}
-              </Descriptions.Item>
-              <Descriptions.Item label="Address Line 1">
-                {selectedResidence.residence_address_line_1 || 'N/A'}
-              </Descriptions.Item>
-              <Descriptions.Item label="Address Line 2">
-                {selectedResidence.residence_address_line_2 || 'N/A'}
-              </Descriptions.Item>
-              <Descriptions.Item label="Address Line 3">
-                {selectedResidence.residence_address_line_3 || 'N/A'}
-              </Descriptions.Item>
-              <Descriptions.Item label="State">
-                {selectedResidence.residence_state || 'N/A'}
-              </Descriptions.Item>
-              <Descriptions.Item label="PIN Code">
-                {selectedResidence.residence_pin_code || 'N/A'}
-              </Descriptions.Item>
-              <Descriptions.Item label="Country">
-                {selectedResidence.residence_country || 'N/A'}
-              </Descriptions.Item>
-              <Descriptions.Item label="House Count">
-                {selectedResidence.residence_house_count || 0}
-              </Descriptions.Item>
-              <Descriptions.Item label="Status">
-                <Tag color={selectedResidence.residence_status === 'Active' ? 'green' : 'red'}>
-                  {selectedResidence.residence_status}
-                </Tag>
-              </Descriptions.Item>
-            </Descriptions>
-
-            <Title level={5} style={{ marginTop: '24px' }}>
-              Owner photograph
-            </Title>
-            <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-              {selectedResidence.residence_owner_name || 'Owner'} · {selectedResidence.residence_id}
-            </Text>
-            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-              <div
-                style={{
-                  width: 120,
-                  height: 120,
-                  borderRadius: 8,
-                  border: '1px solid #d9d9d9',
-                  overflow: 'hidden',
-                  background: '#fafafa',
-                  flexShrink: 0,
-                }}
-              >
-                {selectedResidence.has_owner_photo && ownerDrawerImgUrl ? (
-                  <img
-                    src={ownerDrawerImgUrl}
-                    alt={`${selectedResidence.residence_owner_name || 'Owner'} (${selectedResidence.residence_id})`}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      height: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#bfbfbf',
-                      fontSize: 12,
-                      padding: 8,
-                      textAlign: 'center',
-                    }}
-                  >
-                    No photo uploaded
-                  </div>
-                )}
-              </div>
-              <Space direction="vertical" size="small">
-                <Button
-                  size="small"
-                  icon={<UploadOutlined />}
-                  onClick={() => triggerOwnerPhotoUpload(selectedResidence.residence_id)}
-                >
-                  Upload / replace
-                </Button>
-                {selectedResidence.has_owner_photo && (
-                  <Button size="small" icon={<PictureOutlined />} onClick={() => openOwnerPhotoModal(selectedResidence)}>
-                    View full size
-                  </Button>
-                )}
-                {selectedResidence.has_owner_photo && (
-                  <Popconfirm title="Remove this photo?" onConfirm={() => handleDeleteOwnerPhoto(selectedResidence)}>
-                    <Button size="small" danger icon={<DeleteOutlined />}>
-                      Remove photo
-                    </Button>
-                  </Popconfirm>
-                )}
-              </Space>
-            </div>
-
-            <Title level={4} style={{ marginTop: '24px', color: '#262626' }}>
-              Related Agreements
-            </Title>
-            {agreements.length > 0 ? (
-              agreements.map((agreement) => {
-                const agreementEmployees = employees.filter(
-                  emp => emp.emplyee_allocated_agreement_id === agreement.agreement_id
-                );
-                return (
-                  <Card key={agreement.agreement_id} style={{ marginBottom: '16px' }}>
-                    <Descriptions title={`Agreement: ${agreement.agreement_id}`} bordered column={1} size="small">
+          <Tabs
+            defaultActiveKey="info"
+            size="small"
+            tabBarStyle={{ paddingLeft: 16, paddingRight: 16, marginBottom: 0, background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}
+            items={[
+              {
+                key: 'info',
+                label: 'Details',
+                children: (
+                  <div style={{ padding: '16px 20px' }}>
+                    <Descriptions title="Residence Information" bordered column={1} size="small">
+                      <Descriptions.Item label="Residence ID">{selectedResidence.residence_id}</Descriptions.Item>
+                      <Descriptions.Item label="Owner ID">{selectedResidence.residence_owner_id || 'N/A'}</Descriptions.Item>
+                      <Descriptions.Item label="Owner Name">{selectedResidence.residence_owner_name || 'N/A'}</Descriptions.Item>
+                      <Descriptions.Item label="Door Number">{selectedResidence.residence_door_number || 'N/A'}</Descriptions.Item>
+                      <Descriptions.Item label="Address Line 1">{selectedResidence.residence_address_line_1 || 'N/A'}</Descriptions.Item>
+                      <Descriptions.Item label="Address Line 2">{selectedResidence.residence_address_line_2 || 'N/A'}</Descriptions.Item>
+                      <Descriptions.Item label="Address Line 3">{selectedResidence.residence_address_line_3 || 'N/A'}</Descriptions.Item>
+                      <Descriptions.Item label="State">{selectedResidence.residence_state || 'N/A'}</Descriptions.Item>
+                      <Descriptions.Item label="PIN Code">{selectedResidence.residence_pin_code || 'N/A'}</Descriptions.Item>
+                      <Descriptions.Item label="Country">{selectedResidence.residence_country || 'N/A'}</Descriptions.Item>
+                      <Descriptions.Item label="House Count">{selectedResidence.residence_house_count || 0}</Descriptions.Item>
                       <Descriptions.Item label="Status">
-                        <Tag color={agreement.agreement_status === 'Active' ? 'green' : 'red'}>
-                          {agreement.agreement_status}
+                        <Tag color={selectedResidence.residence_status === 'Active' ? 'green' : 'red'}>
+                          {selectedResidence.residence_status}
                         </Tag>
                       </Descriptions.Item>
-                      <Descriptions.Item label="Possession Date">
-                        {formatDateForDisplay(agreement.agreement_possesion_date)}
-                      </Descriptions.Item>
-                      <Descriptions.Item label="Renewal Due Date">
-                        {formatDateForDisplay(agreement.agreement_renewal_due_date)}
-                      </Descriptions.Item>
-                      <Descriptions.Item label="Monthly Rent">
-                        ₹{agreement.agreement_monthly_rent_amount || 0}
-                      </Descriptions.Item>
-                      <Descriptions.Item label="Advance Amount">
-                        ₹{agreement.agreement_advance_amount || 0}
-                      </Descriptions.Item>
                     </Descriptions>
-                    {agreementEmployees.length > 0 && (
-                      <div style={{ marginTop: '12px' }}>
-                        <strong>Current Residents:</strong>
-                        <ul>
-                          {agreementEmployees.map((emp) => (
-                            <li key={emp.employee_id}>
-                              {emp.employee_first_name} {emp.employee_last_name} ({emp.employee_department})
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+
+                    <Divider orientation="left" style={{ marginTop: 24 }}>Related Agreements</Divider>
+                    {agreements.length > 0 ? (
+                      agreements.map((agreement) => {
+                        const agreementEmployees = employees.filter(
+                          emp => emp.emplyee_allocated_agreement_id === agreement.agreement_id
+                        );
+                        return (
+                          <Card key={agreement.agreement_id} size="small" style={{ marginBottom: 12 }}>
+                            <Descriptions title={`Agreement: ${agreement.agreement_id}`} bordered column={1} size="small">
+                              <Descriptions.Item label="Status">
+                                <Tag color={agreement.agreement_status === 'Active' ? 'green' : 'red'}>{agreement.agreement_status}</Tag>
+                              </Descriptions.Item>
+                              <Descriptions.Item label="Possession Date">{formatDateForDisplay(agreement.agreement_possesion_date)}</Descriptions.Item>
+                              <Descriptions.Item label="Renewal Due Date">{formatDateForDisplay(agreement.agreement_renewal_due_date)}</Descriptions.Item>
+                              <Descriptions.Item label="Monthly Rent">₹{agreement.agreement_monthly_rent_amount || 0}</Descriptions.Item>
+                              <Descriptions.Item label="Advance Amount">₹{agreement.agreement_advance_amount || 0}</Descriptions.Item>
+                            </Descriptions>
+                            {agreementEmployees.length > 0 && (
+                              <div style={{ marginTop: 8 }}>
+                                <strong>Current Residents:</strong>
+                                <ul style={{ marginTop: 4, marginBottom: 0 }}>
+                                  {agreementEmployees.map((emp) => (
+                                    <li key={emp.employee_id}>
+                                      {emp.employee_first_name} {emp.employee_last_name} ({emp.employee_department})
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </Card>
+                        );
+                      })
+                    ) : (
+                      <p>No agreements found for this residence.</p>
                     )}
-                  </Card>
-                );
-              })
-            ) : (
-              <p>No agreements found for this residence.</p>
-            )}
-          </>
+                  </div>
+                ),
+              },
+              {
+                key: 'photos',
+                label: (
+                  <span><FolderOutlined /> Photos</span>
+                ),
+                children: (
+                  <div style={{ padding: '16px 20px' }}>
+                    <DocumentsPanel
+                      entityType="residence"
+                      entityId={selectedResidence.residence_id}
+                      docTypes={['owner_photo', 'property_photo']}
+                      onFilesChange={() => {
+                        fetchResidences();
+                        residenceAPI.getById(selectedResidence.residence_id)
+                          .then(r => setSelectedResidence(r.data))
+                          .catch(() => {});
+                      }}
+                    />
+                  </div>
+                ),
+              },
+            ]}
+          />
         )}
       </Drawer>
 

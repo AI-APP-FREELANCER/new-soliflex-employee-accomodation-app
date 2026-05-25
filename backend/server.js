@@ -20,12 +20,14 @@ const residenceRoutes = require('./routes/residence');
 const agreementRoutes = require('./routes/agreement');
 const employeeRoutes = require('./routes/employee');
 const analyticsRoutes = require('./routes/analytics');
+const filesRoutes     = require('./routes/files');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/residence', residenceRoutes);
 app.use('/api/agreement', agreementRoutes);
 app.use('/api/employee', employeeRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/files', filesRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
