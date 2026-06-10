@@ -402,10 +402,28 @@ const DashboardHome = () => {
 
   const colXAxis = { label: { autoRotate: true, autoHide: false, style: { fontSize: 10 } } };
 
+  // Safe formatter helper: @ant-design/charts v2 may pass the raw y-value (number/string)
+  // rather than the full datum object — handle both cases to avoid NaN labels.
+  const safeRentFmt = (d) => {
+    const v = (typeof d === 'object' && d !== null) ? (d.rent ?? 0) : (parseFloat(d) || 0);
+    if (!v || isNaN(v)) return '';
+    if (v >= 10000000) return `₹${(v / 10000000).toFixed(2)}Cr`;
+    if (v >= 100000)   return `₹${(v / 100000).toFixed(1)}L`;
+    return `₹${(v / 1000).toFixed(0)}K`;
+  };
+
+  const safeAmtFmt = (d) => {
+    const v = (typeof d === 'object' && d !== null) ? (d.amount ?? 0) : (parseFloat(d) || 0);
+    if (!v || isNaN(v)) return '';
+    if (v >= 10000000) return `₹${(v / 10000000).toFixed(2)}Cr`;
+    if (v >= 100000)   return `₹${(v / 100000).toFixed(1)}L`;
+    return `₹${(v / 1000).toFixed(0)}K`;
+  };
+
   const deptCountConfig = {
     data: deptCountData, xField: 'dept', yField: 'count',
     color: '#1890ff',
-    label: { position: 'top', style: { fill: '#595959', fontSize: 10 } },
+    label: { position: 'top', style: { fill: '#262626', fontSize: 11, fontWeight: 700 } },
     xAxis: colXAxis,
     yAxis: { title: { text: 'Employees' } },
     tooltip: { formatter: (d) => ({ name: 'Employees', value: d.count }) },
@@ -416,13 +434,17 @@ const DashboardHome = () => {
     color: '#E87103',
     label: {
       position: 'top',
-      style: { fill: '#595959', fontSize: 9 },
-      formatter: (d) => d.rent >= 100000 ? `₹${(d.rent/100000).toFixed(1)}L` : `₹${(d.rent/1000).toFixed(0)}K`,
+      style: { fill: '#262626', fontSize: 10, fontWeight: 700 },
+      formatter: safeRentFmt,
     },
     xAxis: colXAxis,
     yAxis: {
       title: { text: 'Monthly Rent' },
-      label: { formatter: (v) => v >= 100000 ? `₹${(v/100000).toFixed(0)}L` : `₹${(v/1000).toFixed(0)}K` },
+      label: { formatter: (v) => {
+        const n = parseFloat(v) || 0;
+        if (n >= 100000) return `₹${(n / 100000).toFixed(0)}L`;
+        return `₹${(n / 1000).toFixed(0)}K`;
+      }},
     },
     tooltip: { formatter: (d) => ({ name: 'Monthly Rent', value: `₹${Number(d.rent).toLocaleString('en-IN')}` }) },
   };
@@ -432,22 +454,21 @@ const DashboardHome = () => {
     color: ({ stage }) => stage === 'Locked (Active)' ? '#E87103' : stage === 'Received Back' ? '#52c41a' : '#f5222d',
     label: {
       position: 'top',
-      style: { fill: '#595959', fontSize: 11 },
-      formatter: (d) => {
-        const v = d.amount;
-        if (v >= 10000000) return `₹${(v/10000000).toFixed(2)}Cr`;
-        if (v >= 100000)   return `₹${(v/100000).toFixed(1)}L`;
-        return `₹${(v/1000).toFixed(0)}K`;
-      },
+      style: { fill: '#262626', fontSize: 11, fontWeight: 700 },
+      formatter: safeAmtFmt,
     },
-    yAxis: { label: { formatter: (v) => v >= 100000 ? `₹${(v/100000).toFixed(0)}L` : `₹${(v/1000).toFixed(0)}K` } },
+    yAxis: { label: { formatter: (v) => {
+      const n = parseFloat(v) || 0;
+      if (n >= 100000) return `₹${(n / 100000).toFixed(0)}L`;
+      return `₹${(n / 1000).toFixed(0)}K`;
+    }}},
     tooltip: { formatter: (d) => ({ name: d.stage, value: `₹${Number(d.amount).toLocaleString('en-IN')}` }) },
   };
 
   const renewalConfig = {
     data: renewalAlertData, xField: 'status', yField: 'count',
     color: ({ status }) => status === 'Past Due' ? '#f5222d' : status === 'Due (90 Days)' ? '#faad14' : '#1890ff',
-    label: { position: 'top', style: { fill: '#595959', fontSize: 13, fontWeight: 600 } },
+    label: { position: 'top', style: { fill: '#262626', fontSize: 13, fontWeight: 700 } },
     yAxis: { title: { text: 'Count' } },
     tooltip: { formatter: (d) => ({ name: d.status, value: d.count }) },
   };
@@ -498,32 +519,47 @@ const DashboardHome = () => {
         </Col>
       </Row>
       {/* Executive summary table */}
-      <TCard
-        title="Executive Summary Table"
-        icon={<FileTextOutlined />}
-        dataSource={misData.ownerSummary || []}
-        rowKey="metric"
-        exportName="Executive_Summary"
-        columns={[
-          { title: 'Metric', dataIndex: 'metric', key: 'metric', width: 280 },
-          {
-            title: 'Current Value',
-            dataIndex: 'currentValue',
-            key: 'currentValue',
-            render: (v, row) => {
-              const fmt = (typeof v === 'number' && v >= 0 && v < 1e12) ? fmtCFull(v) : v;
-              if (row.metric === 'Past Due Renewals' && typeof v === 'number' && v > 0)
-                return <Typography.Link onClick={() => navigate('/agreements?filter=pastDue')}>{fmt}</Typography.Link>;
-              if (row.metric === 'Due in 90 Days' && typeof v === 'number')
-                return <Typography.Link onClick={() => navigate('/agreements?filter=due90')}>{fmt}</Typography.Link>;
-              if (row.metric === 'Pipeline Ready (Scheduled to Vacate)' && typeof v === 'number')
-                return <Typography.Link onClick={() => navigate('/agreements?filter=scheduledToVacate')}>{fmt}</Typography.Link>;
-              return fmt;
-            },
-          },
-          { title: 'Action Required', dataIndex: 'actionRequired', key: 'actionRequired', ellipsis: true },
-        ]}
-      />
+      {(() => {
+        // Only these metrics carry a ₹ (rupee) value — all others are counts, percentages or dates
+        const CURRENCY_METRICS = new Set([
+          'Total Monthly Burn (Rent)',
+          'Advances at Risk (Due Back)',
+          'Advance Pending Refund',
+        ]);
+        const fmtSummaryValue = (v, metric) => {
+          if (typeof v !== 'number') return v;           // string / percentage / date — return as-is
+          if (CURRENCY_METRICS.has(metric)) return fmtCFull(v); // monetary → ₹ formatted
+          return v.toLocaleString('en-IN');              // counts → plain number, no ₹
+        };
+        return (
+          <TCard
+            title="Executive Summary Table"
+            icon={<FileTextOutlined />}
+            dataSource={misData.ownerSummary || []}
+            rowKey="metric"
+            exportName="Executive_Summary"
+            columns={[
+              { title: 'Metric', dataIndex: 'metric', key: 'metric', width: 280 },
+              {
+                title: 'Current Value',
+                dataIndex: 'currentValue',
+                key: 'currentValue',
+                render: (v, row) => {
+                  const fmt = fmtSummaryValue(v, row.metric);
+                  if (row.metric === 'Past Due Renewals' && typeof v === 'number' && v > 0)
+                    return <Typography.Link onClick={() => navigate('/agreements?filter=pastDue')}>{fmt}</Typography.Link>;
+                  if (row.metric === 'Due in 90 Days' && typeof v === 'number')
+                    return <Typography.Link onClick={() => navigate('/agreements?filter=due90')}>{fmt}</Typography.Link>;
+                  if (row.metric === 'Pipeline Ready (Scheduled to Vacate)' && typeof v === 'number')
+                    return <Typography.Link onClick={() => navigate('/agreements?filter=scheduledToVacate')}>{fmt}</Typography.Link>;
+                  return fmt;
+                },
+              },
+              { title: 'Action Required', dataIndex: 'actionRequired', key: 'actionRequired', ellipsis: true },
+            ]}
+          />
+        );
+      })()}
     </div>
   );
 

@@ -15,6 +15,7 @@ import Residences from './Residences';
 import Agreements from './Agreements';
 import Employees from './Employees';
 import DashboardHome from './DashboardHome';
+import BedManagement from './BedManagement';
 import { useResponsive } from '../utils/useResponsive';
 import '../App.css';
 
@@ -32,9 +33,10 @@ const Dashboard = () => {
   // Sync selectedKey with current route
   const getSelectedKeyFromPath = (pathname) => {
     if (pathname.startsWith('/agreements')) return 'agreements';
-    if (pathname.startsWith('/employees')) return 'employees';
+    if (pathname.startsWith('/employees'))  return 'employees';
     if (pathname.startsWith('/residences')) return 'residences';
-    if (pathname.startsWith('/analytics')) return 'analytics';
+    if (pathname.startsWith('/beds'))       return 'beds';
+    if (pathname.startsWith('/analytics'))  return 'analytics';
     return 'dashboard';
   };
 
@@ -70,6 +72,11 @@ const Dashboard = () => {
       label: 'Residences',
     },
     {
+      key: 'beds',
+      icon: <HomeOutlined />,
+      label: 'Bed Management',
+    },
+    {
       key: 'agreements',
       icon: <FileTextOutlined />,
       label: 'Agreements',
@@ -98,11 +105,12 @@ const Dashboard = () => {
     }
     // Navigate to the corresponding route
     const routeMap = {
-      'dashboard': '/dashboard',
+      'dashboard':  '/dashboard',
       'residences': '/residences',
+      'beds':       '/beds',
       'agreements': '/agreements',
-      'employees': '/employees',
-      'analytics': '/analytics',
+      'employees':  '/employees',
+      'analytics':  '/analytics',
     };
     if (routeMap[key]) {
       navigate(routeMap[key]);
@@ -113,6 +121,8 @@ const Dashboard = () => {
     switch (selectedKey) {
       case 'residences':
         return <Residences />;
+      case 'beds':
+        return <BedManagement />;
       case 'agreements':
         return <Agreements />;
       case 'employees':

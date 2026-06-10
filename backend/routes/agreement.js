@@ -364,6 +364,52 @@ router.post('/:id/revoke-vacate', async (req, res) => {
   }
 });
 
+// ── POST /:id/renew ────────────────────────────────────────────────────────
+// Renews an agreement:
+//   • Sets agreement_renewal_due_date to the new date
+//   • Optionally updates agreement_monthly_rent_amount (if renegotiated)
+//   • Optionally updates agreement_possession_date to the renewal start date
+//   • Records a renewal_notes field (stored in agreement_statutory_status if no dedicated col)
+router.post('/:id/renew', async (req, res) => {
+  try {
+    const agreements = await excelReader.getAgreements('all');
+    const agreement  = agreements.find(a => a.agreement_id === req.params.id);
+    if (!agreement) return res.status(404).json({ error: 'Agreement not found' });
+
+    const { new_renewal_date, new_monthly_rent, renewal_notes, new_possession_date } = req.body;
+
+    if (!new_renewal_date) return res.status(400).json({ error: 'new_renewal_date is required' });
+
+    const renewDate = dayjs(new_renewal_date);
+    if (!renewDate.isValid()) return res.status(400).json({ error: 'Invalid renewal date format' });
+
+    // Only active agreements can be renewed
+    if (String(agreement.agreement_status || '').toLowerCase() !== 'active') {
+      return res.status(400).json({ error: 'Only active agreements can be renewed' });
+    }
+
+    const updates = {
+      agreement_renewal_due_date: renewDate.format('YYYY-MM-DD'),
+    };
+
+    if (new_monthly_rent !== undefined && new_monthly_rent !== null && new_monthly_rent !== '') {
+      const rent = parseFloat(new_monthly_rent);
+      if (!isNaN(rent) && rent >= 0) updates.agreement_monthly_rent_amount = rent;
+    }
+
+    if (new_possession_date) {
+      const pd = dayjs(new_possession_date);
+      if (pd.isValid()) updates.agreement_possesion_date = pd.format('YYYY-MM-DD');
+    }
+
+    const updated = await excelReader.updateAgreement(req.params.id, updates);
+    if (!updated) return res.status(404).json({ error: 'Agreement not found after update' });
+    res.json(enrichAgreement(updated));
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.post('/:id/process-refund', async (req, res) => {
   try {
     const { agreement_maintenance_cut, agreement_deduction_electricity, agreement_deduction_water, agreement_deduction_other } = req.body;

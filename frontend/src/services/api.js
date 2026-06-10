@@ -90,6 +90,8 @@ export const agreementAPI = {
     const baseUrl = api.defaults.baseURL || '';
     return `${baseUrl}/agreement/${id}/attachment`;
   },
+  // Renewal
+  renew: (id, data) => api.post(`/agreement/${id}/renew`, data),
   // Vacate and Refund methods
   scheduleVacate: (id, data) => api.post(`/agreement/${id}/schedule-vacate`, data),
   revokeVacate: (id) => api.post(`/agreement/${id}/revoke-vacate`),
@@ -146,6 +148,31 @@ export const agreementAttachmentsAPI = {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
   deleteById: (id, fileId) => api.delete(`/agreement/${id}/attachment/${fileId}`),
+};
+
+// Bed Management APIs
+export const bedAPI = {
+  getBeds: (residenceId) =>
+    api.get(`/beds${residenceId ? `?residenceId=${residenceId}` : ''}`),
+  createBeds: (residenceId, roomNumber, beds) =>
+    api.post('/beds', { residence_id: residenceId, room_number: roomNumber, beds }),
+  createBed: (data) => api.post('/beds', data),
+  updateBed: (bedId, data) => api.put(`/beds/${encodeURIComponent(bedId)}`, data),
+  deleteBed: (bedId) => api.delete(`/beds/${encodeURIComponent(bedId)}`),
+  getAllocations: (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.residenceId) q.append('residenceId', params.residenceId);
+    if (params.employeeId)  q.append('employeeId', params.employeeId);
+    if (params.bedId)       q.append('bedId', params.bedId);
+    if (params.activeOnly)  q.append('activeOnly', 'true');
+    return api.get(`/beds/allocations${q.toString() ? '?' + q.toString() : ''}`);
+  },
+  allocateBed: (bedId, data) =>
+    api.post(`/beds/${encodeURIComponent(bedId)}/allocate`, data),
+  releaseBed: (allocId, data) =>
+    api.put(`/beds/allocations/${allocId}/release`, data),
+  updateAllocation: (allocId, data) =>
+    api.put(`/beds/allocations/${allocId}`, data),
 };
 
 // Analytics/Reporting APIs

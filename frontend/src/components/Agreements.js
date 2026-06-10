@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Table, Card, Button, Input, InputNumber, Tag, Space, Select, DatePicker, message, Modal, Form, Row, Col, Typography, Empty, Popconfirm, Badge, Drawer } from 'antd';
-import { SearchOutlined, PlusOutlined, EditOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, UploadOutlined, CalendarOutlined, DollarOutlined, CloseCircleOutlined, FilePdfOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { SearchOutlined, PlusOutlined, EditOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, UploadOutlined, CalendarOutlined, DollarOutlined, CloseCircleOutlined, FilePdfOutlined, FolderOpenOutlined, SyncOutlined } from '@ant-design/icons';
 import { agreementAPI, residenceAPI } from '../services/api';
 import apiClient from '../services/api';
 import DocumentsPanel from './DocumentsPanel';
@@ -36,6 +36,11 @@ const Agreements = () => {
   const [docsDrawerOpen, setDocsDrawerOpen]           = useState(false);
   const [docsDrawerAgreement, setDocsDrawerAgreement] = useState(null);
   
+  // Renewal state
+  const [isRenewModalVisible, setIsRenewModalVisible]   = useState(false);
+  const [renewingAgreement, setRenewingAgreement]       = useState(null);
+  const [renewForm] = Form.useForm();
+
   // Vacate and Refund states
   const [isRefundModalVisible, setIsRefundModalVisible] = useState(false);
   const [isVacateModalVisible, setIsVacateModalVisible] = useState(false);
@@ -277,7 +282,26 @@ const Agreements = () => {
       render: (_, record) => (
         <Space>
           <Button icon={<EditOutlined />} onClick={() => handleEdit(record)} title="Edit">Edit</Button>
-          {(record.agreement_scheduled_to_vacate === true || 
+          {String(record.agreement_status || '').toLowerCase() === 'active' && (
+            <Button
+              icon={<SyncOutlined />}
+              onClick={() => handleOpenRenew(record)}
+              title="Renew Agreement"
+              style={{
+                borderColor:
+                  record.computed_renewal_status === 'Past Due' ? '#f5222d' :
+                  record.computed_renewal_status === 'Due Soon' ? '#faad14' : '#1890ff',
+                color:
+                  record.computed_renewal_status === 'Past Due' ? '#f5222d' :
+                  record.computed_renewal_status === 'Due Soon' ? '#faad14' : '#1890ff',
+              }}
+            >
+              {record.computed_renewal_status === 'Past Due' ? 'Renew (Overdue!)' :
+               record.computed_renewal_status === 'Due Soon' ? 'Renew (Due Soon)' :
+               'Renew'}
+            </Button>
+          )}
+          {(record.agreement_scheduled_to_vacate === true ||
             record.agreement_scheduled_to_vacate === 'Yes' || 
             record.agreement_scheduled_to_vacate === 'yes') ? (
             <Popconfirm
@@ -431,6 +455,47 @@ const Agreements = () => {
     } catch (error) {
       const errorMessage = error.response?.data?.error || 'Failed to delete PDF';
       message.error(errorMessage);
+    }
+  };
+
+  // ── Renewal handlers ─────────────────────────────────────────────────────
+  const handleOpenRenew = (record) => {
+    setRenewingAgreement(record);
+    // Suggest a new renewal date: current renewal date + 11 months, or today + 11 months
+    const base = record.agreement_renewal_due_date
+      ? dayjs(record.agreement_renewal_due_date)
+      : dayjs();
+    const suggested = base.add(11, 'month');
+    renewForm.setFieldsValue({
+      new_renewal_date:   suggested,
+      new_monthly_rent:   record.agreement_monthly_rent_amount || '',
+      new_possession_date: record.agreement_renewal_due_date
+        ? dayjs(record.agreement_renewal_due_date)
+        : null,
+      renewal_notes: '',
+    });
+    setIsRenewModalVisible(true);
+  };
+
+  const handleRenewOk = async () => {
+    try {
+      const values = await renewForm.validateFields();
+      await agreementAPI.renew(renewingAgreement.agreement_id, {
+        new_renewal_date:    values.new_renewal_date.format('YYYY-MM-DD'),
+        new_monthly_rent:    values.new_monthly_rent || undefined,
+        new_possession_date: values.new_possession_date
+          ? values.new_possession_date.format('YYYY-MM-DD')
+          : undefined,
+        renewal_notes: values.renewal_notes || undefined,
+      });
+      message.success(`Agreement ${renewingAgreement.agreement_id} renewed successfully`);
+      setIsRenewModalVisible(false);
+      setRenewingAgreement(null);
+      renewForm.resetFields();
+      fetchAgreements();
+    } catch (error) {
+      if (error.errorFields) return; // form validation
+      message.error(error.response?.data?.error || 'Failed to renew agreement');
     }
   };
 
@@ -752,6 +817,115 @@ const Agreements = () => {
             </Col>
           </Row>
         </Form>
+      </Modal>
+
+      {/* ── Renewal Modal ──────────────────────────────────────────────────── */}
+      <Modal
+        title={
+          <Space>
+            <SyncOutlined style={{ color: '#1890ff' }} />
+            <span>
+              Renew Agreement
+              {renewingAgreement && ` — ${renewingAgreement.agreement_id}`}
+            </span>
+            {renewingAgreement?.computed_renewal_status === 'Past Due' && (
+              <Tag color="error">Overdue</Tag>
+            )}
+            {renewingAgreement?.computed_renewal_status === 'Due Soon' && (
+              <Tag color="warning">Due Soon</Tag>
+            )}
+          </Space>
+        }
+        open={isRenewModalVisible}
+        onOk={handleRenewOk}
+        onCancel={() => {
+          setIsRenewModalVisible(false);
+          setRenewingAgreement(null);
+          renewForm.resetFields();
+        }}
+        okText="Confirm Renewal"
+        width={600}
+      >
+        {renewingAgreement && (
+          <>
+            {/* Current agreement summary */}
+            <Card size="small" style={{ marginBottom: 16, background: '#fafafa' }}>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Text type="secondary">Residence</Text>
+                  <br /><Text strong>{renewingAgreement.agreement_residence_id}</Text>
+                </Col>
+                <Col span={12}>
+                  <Text type="secondary">Current Renewal Date</Text>
+                  <br />
+                  <Text
+                    strong
+                    style={{
+                      color: renewingAgreement.computed_renewal_status === 'Past Due' ? '#f5222d' :
+                             renewingAgreement.computed_renewal_status === 'Due Soon' ? '#faad14' : undefined,
+                    }}
+                  >
+                    {renewingAgreement.agreement_renewal_due_date
+                      ? formatDateForDisplay(renewingAgreement.agreement_renewal_due_date)
+                      : '—'}
+                  </Text>
+                </Col>
+                <Col span={12} style={{ marginTop: 8 }}>
+                  <Text type="secondary">Current Monthly Rent</Text>
+                  <br /><Text strong>₹{Number(renewingAgreement.agreement_monthly_rent_amount || 0).toLocaleString()}</Text>
+                </Col>
+                <Col span={12} style={{ marginTop: 8 }}>
+                  <Text type="secondary">Advance Amount</Text>
+                  <br /><Text strong>₹{Number(renewingAgreement.agreement_advance_amount || 0).toLocaleString()}</Text>
+                </Col>
+              </Row>
+            </Card>
+
+            <Form form={renewForm} layout="vertical">
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="new_renewal_date"
+                    label="New Renewal Due Date"
+                    rules={[{ required: true, message: 'Please select the new renewal date' }]}
+                    extra="Typically 11–12 months from the renewal start date"
+                  >
+                    <DatePicker style={{ width: '100%' }} format="DD-MM-YYYY" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="new_possession_date"
+                    label="Renewal Start Date (Possession)"
+                    extra="Leave blank to keep the existing possession date"
+                  >
+                    <DatePicker style={{ width: '100%' }} format="DD-MM-YYYY" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="new_monthly_rent"
+                    label="Revised Monthly Rent (₹)"
+                    extra="Leave unchanged if rent stays the same"
+                  >
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      min={0}
+                      precision={2}
+                      prefix="₹"
+                      placeholder={String(renewingAgreement.agreement_monthly_rent_amount || '')}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="renewal_notes" label="Notes (optional)">
+                    <Input placeholder="e.g. 5% rent escalation applied" />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Form>
+          </>
+        )}
       </Modal>
 
       {/* Vacate Modal */}

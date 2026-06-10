@@ -45,6 +45,35 @@ async function runStartupMigrations() {
     `ALTER TABLE agreement_master
        ADD COLUMN IF NOT EXISTS agreement_deduction_other       NUMERIC(15,2) DEFAULT 0`,
 
+    // ── Bed-level tracking tables ─────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS bed_master (
+       bed_id          VARCHAR(80)  PRIMARY KEY,
+       residence_id    VARCHAR(50)  NOT NULL,
+       room_number     VARCHAR(30)  NOT NULL,
+       bed_label       VARCHAR(20)  NOT NULL,
+       bed_type        VARCHAR(50)  DEFAULT 'Standard',
+       is_active       BOOLEAN      DEFAULT true,
+       notes           TEXT,
+       created_at      TIMESTAMPTZ  DEFAULT NOW(),
+       updated_at      TIMESTAMPTZ  DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_bed_master_residence ON bed_master(residence_id)`,
+
+    `CREATE TABLE IF NOT EXISTS bed_allocations (
+       alloc_id        SERIAL       PRIMARY KEY,
+       bed_id          VARCHAR(80)  NOT NULL,
+       employee_id     VARCHAR(50)  NOT NULL,
+       allocated_date  DATE         NOT NULL DEFAULT CURRENT_DATE,
+       release_date    DATE,
+       release_reason  VARCHAR(100),
+       is_active       BOOLEAN      DEFAULT true,
+       notes           TEXT,
+       created_at      TIMESTAMPTZ  DEFAULT NOW(),
+       updated_at      TIMESTAMPTZ  DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_bed_alloc_bed      ON bed_allocations(bed_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_bed_alloc_employee ON bed_allocations(employee_id)`,
+
     // Persistent file storage — tracks every uploaded document on the volume.
     `CREATE TABLE IF NOT EXISTS file_uploads (
        file_id         VARCHAR(40) PRIMARY KEY,

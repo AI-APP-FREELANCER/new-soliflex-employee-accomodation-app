@@ -465,6 +465,174 @@ class DbReader {
     await pool.query('DELETE FROM employee_master WHERE employee_id = $1', [id]);
     return normalizeEmployee(cur.rows[0]);
   }
+
+  // ── Bed Master ──────────────────────────────────────────────────────────────
+
+  async getBeds(residenceId) {
+    let query, params;
+    if (residenceId) {
+      query  = 'SELECT * FROM bed_master WHERE residence_id = $1 ORDER BY room_number, bed_label';
+      params = [residenceId];
+    } else {
+      query  = 'SELECT * FROM bed_master ORDER BY residence_id, room_number, bed_label';
+      params = [];
+    }
+    const res = await pool.query(query, params);
+    return res.rows;
+  }
+
+  async addBed(data) {
+    const res = await pool.query(`
+      INSERT INTO bed_master (bed_id, residence_id, room_number, bed_label, bed_type, is_active, notes)
+      VALUES ($1, $2, $3, $4, $5, true, $6)
+      ON CONFLICT (bed_id) DO NOTHING
+      RETURNING *
+    `, [
+      data.bed_id,
+      data.residence_id,
+      data.room_number,
+      data.bed_label,
+      data.bed_type || 'Standard',
+      data.notes || null,
+    ]);
+    return res.rows[0] || null;
+  }
+
+  async updateBed(bedId, data) {
+    const res = await pool.query(`
+      UPDATE bed_master SET
+        bed_type = COALESCE($2, bed_type),
+        is_active = COALESCE($3, is_active),
+        notes = $4,
+        updated_at = NOW()
+      WHERE bed_id = $1
+      RETURNING *
+    `, [bedId, data.bed_type || null, data.is_active ?? null, data.notes ?? null]);
+    return res.rows[0] || null;
+  }
+
+  async deleteBed(bedId) {
+    // Only allow delete if not currently occupied
+    const active = await pool.query(
+      'SELECT alloc_id FROM bed_allocations WHERE bed_id = $1 AND is_active = true LIMIT 1', [bedId]
+    );
+    if (active.rows.length) throw new Error('Bed is currently occupied — release allocation first');
+    const res = await pool.query('DELETE FROM bed_master WHERE bed_id = $1 RETURNING *', [bedId]);
+    return res.rows[0] || null;
+  }
+
+  // ── Bed Allocations ─────────────────────────────────────────────────────────
+
+  async getBedAllocations(filters = {}) {
+    let where = [];
+    let params = [];
+    let idx = 1;
+    if (filters.bed_id)      { where.push(`a.bed_id = $${idx++}`);      params.push(filters.bed_id); }
+    if (filters.employee_id) { where.push(`a.employee_id = $${idx++}`); params.push(filters.employee_id); }
+    if (filters.active_only) { where.push(`a.is_active = true`); }
+    if (filters.residence_id) {
+      where.push(`b.residence_id = $${idx++}`);
+      params.push(filters.residence_id);
+    }
+    const whereStr = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const res = await pool.query(`
+      SELECT
+        a.*,
+        b.residence_id, b.room_number, b.bed_label, b.bed_type,
+        e.employee_first_name, e.employee_last_name, e.employee_sir_name,
+        e.employee_department, e.employee_designation,
+        e.employee_last_working_date, e.employee_status
+      FROM bed_allocations a
+      JOIN bed_master b ON a.bed_id = b.bed_id
+      LEFT JOIN employee_master e ON a.employee_id = e.employee_id
+      ${whereStr}
+      ORDER BY a.allocated_date DESC
+    `, params);
+    return res.rows;
+  }
+
+  /**
+   * Allocate a bed to an employee.
+   * - Prevents double allocation: raises an error if the bed already has an active allocation.
+   * - release_date is auto-set from the employee's last_working_date if available and not overridden.
+   */
+  async allocateBed(bedId, employeeId, allocatedDate, releaseDate, notes) {
+    // Check bed exists
+    const bedRes = await pool.query('SELECT * FROM bed_master WHERE bed_id = $1', [bedId]);
+    if (!bedRes.rows.length) throw new Error(`Bed ${bedId} not found`);
+
+    // Check for existing active allocation on this bed
+    const existing = await pool.query(
+      'SELECT a.alloc_id, a.employee_id, e.employee_first_name, e.employee_last_name FROM bed_allocations a LEFT JOIN employee_master e ON a.employee_id = e.employee_id WHERE a.bed_id = $1 AND a.is_active = true LIMIT 1',
+      [bedId]
+    );
+    if (existing.rows.length) {
+      const occ = existing.rows[0];
+      const name = [occ.employee_first_name, occ.employee_last_name].filter(Boolean).join(' ') || occ.employee_id;
+      throw new Error(`Bed ${bedId} is already occupied by ${name} — release the current allocation first`);
+    }
+
+    // Check if employee already has an active allocation on another bed
+    const empBed = await pool.query(
+      'SELECT a.bed_id FROM bed_allocations a WHERE a.employee_id = $1 AND a.is_active = true LIMIT 1',
+      [employeeId]
+    );
+    if (empBed.rows.length) {
+      throw new Error(`Employee ${employeeId} is already allocated to bed ${empBed.rows[0].bed_id}. Release that allocation first.`);
+    }
+
+    // Auto-derive release_date from employee LWD if not provided
+    let effectiveReleaseDate = releaseDate || null;
+    if (!effectiveReleaseDate) {
+      const empRes = await pool.query('SELECT employee_last_working_date FROM employee_master WHERE employee_id = $1', [employeeId]);
+      if (empRes.rows.length && empRes.rows[0].employee_last_working_date) {
+        effectiveReleaseDate = formatDate(empRes.rows[0].employee_last_working_date);
+      }
+    }
+
+    const res = await pool.query(`
+      INSERT INTO bed_allocations (bed_id, employee_id, allocated_date, release_date, notes)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `, [bedId, employeeId, allocatedDate || new Date().toISOString().split('T')[0], effectiveReleaseDate, notes || null]);
+    return res.rows[0];
+  }
+
+  /**
+   * Release a bed allocation. Sets is_active=false and stamps the release date/reason.
+   */
+  async releaseBed(allocId, releaseDate, reason) {
+    const res = await pool.query(`
+      UPDATE bed_allocations
+      SET is_active = false,
+          release_date = COALESCE($2, release_date, CURRENT_DATE),
+          release_reason = $3,
+          updated_at = NOW()
+      WHERE alloc_id = $1
+      RETURNING *
+    `, [allocId, releaseDate || null, reason || 'Released by HR']);
+    return res.rows[0] || null;
+  }
+
+  /**
+   * Manually adjust allocation dates (HR override).
+   */
+  async updateBedAllocation(allocId, updates) {
+    const fields = [];
+    const params = [allocId];
+    let idx = 2;
+    if (updates.release_date  !== undefined) { fields.push(`release_date = $${idx++}`);  params.push(updates.release_date); }
+    if (updates.allocated_date !== undefined) { fields.push(`allocated_date = $${idx++}`); params.push(updates.allocated_date); }
+    if (updates.notes          !== undefined) { fields.push(`notes = $${idx++}`);          params.push(updates.notes); }
+    if (updates.release_reason !== undefined) { fields.push(`release_reason = $${idx++}`); params.push(updates.release_reason); }
+    if (!fields.length) return null;
+    fields.push('updated_at = NOW()');
+    const res = await pool.query(
+      `UPDATE bed_allocations SET ${fields.join(', ')} WHERE alloc_id = $1 RETURNING *`,
+      params
+    );
+    return res.rows[0] || null;
+  }
 }
 
 // Singleton — same shape as the old excelReader singleton

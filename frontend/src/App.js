@@ -62,6 +62,14 @@ function App() {
             }
           />
           <Route
+            path="/beds"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/analytics"
             element={
               <ProtectedRoute>
