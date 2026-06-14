@@ -104,10 +104,11 @@ const BedManagement = ({ residenceId: propResidenceId }) => {
 
   // ── Add room + beds ──────────────────────────────────────────────────────
   const handleAddRoom = async (values) => {
-    const { room_number, bed_count, bed_type } = values;
+    const { room_number, bed_count, bed_type, floor_number } = values;
     const bedsPayload = Array.from({ length: bed_count }, (_, i) => ({
-      bed_label: `B${i + 1}`,
-      bed_type:  bed_type || 'Standard',
+      bed_label:    `B${i + 1}`,
+      bed_type:     bed_type    || 'Standard',
+      floor_number: floor_number || null,
     }));
     try {
       await bedAPI.createBeds(selectedResId, room_number, bedsPayload);
@@ -245,6 +246,12 @@ const BedManagement = ({ residenceId: propResidenceId }) => {
       title: 'Bed',
       dataIndex: 'bed_label',
       key: 'bed_label',
+    },
+    {
+      title: 'Floor',
+      dataIndex: 'floor_number',
+      key: 'floor_number',
+      render: (v) => v ? <Tag color="geekblue">{v}</Tag> : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
     },
     {
       title: 'Type',
@@ -464,6 +471,18 @@ const BedManagement = ({ residenceId: propResidenceId }) => {
           </Form.Item>
           <Form.Item name="bed_count" label="Number of Beds in this Room" rules={[{ required: true, message: 'Required' }]}>
             <InputNumber min={1} max={20} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="floor_number" label="Floor / Level">
+            <Select allowClear placeholder="Select floor (optional)">
+              <Option value="Ground Floor">Ground Floor</Option>
+              <Option value="1st Floor">1st Floor</Option>
+              <Option value="2nd Floor">2nd Floor</Option>
+              <Option value="3rd Floor">3rd Floor</Option>
+              <Option value="4th Floor">4th Floor</Option>
+              <Option value="5th Floor">5th Floor</Option>
+              <Option value="6th Floor">6th Floor</Option>
+              <Option value="Basement">Basement</Option>
+            </Select>
           </Form.Item>
           <Form.Item name="bed_type" label="Bed Type" initialValue="Standard">
             <Select>

@@ -190,6 +190,15 @@ export const analyticsAPI = {
   getSpendOverTime: (period = 'monthly') => api.get(`/analytics/spend-over-time?period=${period}`),
   getEmployeeBreakdown: () => api.get('/analytics/employee-breakdown'),
   getDepartmentRentCost: () => api.get('/analytics/department-rent-cost'),
+  getAvailabilityDetail: () => api.get('/analytics/availability-detail'),
+  getAttrition: (params = {}) => {
+    const q = new URLSearchParams();
+    if (params.dateFrom)   q.append('dateFrom', params.dateFrom);
+    if (params.dateTo)     q.append('dateTo', params.dateTo);
+    if (params.department) q.append('department', params.department);
+    if (params.unit)       q.append('unit', params.unit);
+    return api.get(`/analytics/attrition${q.toString() ? '?' + q.toString() : ''}`);
+  },
 };
 
 export default api;

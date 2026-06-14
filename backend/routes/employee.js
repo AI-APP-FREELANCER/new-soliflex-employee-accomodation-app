@@ -221,6 +221,23 @@ router.put('/:id', async (req, res) => {
     const payload = toBackend(req.body);
     const updated = await excelReader.updateEmployee(req.params.id, payload);
     if (!updated) return res.status(404).json({ error: 'Employee not found' });
+
+    // ── Auto-release bed when employee is set INACTIVE ────────────────────
+    const newStatus = String(updated.employee_status || '').toUpperCase();
+    if (newStatus === 'INACTIVE') {
+      try {
+        const releaseDate = updated.employee_last_working_date || new Date().toISOString().split('T')[0];
+        await pool.query(`
+          UPDATE bed_allocations
+          SET is_active = false, release_date = $2, release_reason = 'Employee Inactive / Left Organisation', updated_at = NOW()
+          WHERE employee_id = $1 AND is_active = true
+        `, [req.params.id, releaseDate]);
+      } catch (bedErr) {
+        // Non-fatal: log but don't fail the employee update
+        if (process.env.NODE_ENV === 'development') console.error('Bed auto-release error:', bedErr.message);
+      }
+    }
+
     res.json(await enrichEmployee(updated));
   } catch (err) {
     res.status(500).json({ error: 'Internal server error' });

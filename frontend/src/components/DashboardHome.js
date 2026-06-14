@@ -1,17 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Table, Spin, Typography, Button, Dropdown, message, Alert,
-  Row, Col, Statistic, Tabs, Tag, Space,
+  Row, Col, Statistic, Tabs, Tag, Space, Modal, Collapse, Badge,
 } from 'antd';
 import {
   DownloadOutlined, FileExcelOutlined, ReloadOutlined,
   HomeOutlined, TeamOutlined, DollarOutlined, CalendarOutlined,
   WarningOutlined, UserOutlined, BankOutlined, FileTextOutlined,
   DashboardOutlined, SafetyCertificateOutlined, ApartmentOutlined,
+  AppstoreOutlined, ShopOutlined, ArrowRightOutlined,
 } from '@ant-design/icons';
 import { Column, Pie } from '@ant-design/charts';
 import { useNavigate } from 'react-router-dom';
-import api, { agreementAPI, residenceAPI, employeeAPI } from '../services/api';
+import api, { agreementAPI, residenceAPI, employeeAPI, analyticsAPI } from '../services/api';
 import { exportTableToExcel, exportMultipleSheetsToExcel } from '../utils/exportUtils';
 import { formatDateForDisplay } from '../utils/dateUtils';
 import dayjs from 'dayjs';
@@ -136,19 +137,45 @@ const DashboardHome = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [misData, setMisData] = useState(null);
+  const [analyticsData, setAnalyticsData] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [availModal, setAvailModal] = useState({ open: false, type: null, title: '' });
+  const [availDetail, setAvailDetail] = useState([]);
+  const [availDetailLoading, setAvailDetailLoading] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/analytics/mis');
-      setMisData(res.data || {});
+      const [misRes, analyticsRes] = await Promise.all([
+        api.get('/analytics/mis'),
+        api.get('/analytics'),
+      ]);
+      setMisData(misRes.data || {});
+      setAnalyticsData(analyticsRes.data || {});
     } catch {
       message.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
   };
+
+  const openAvailModal = useCallback(async (type) => {
+    const titles = {
+      properties: 'Vacant Properties',
+      rooms:      'Vacant Rooms — Detail',
+      beds:       'Available Beds — Detail',
+    };
+    setAvailModal({ open: true, type, title: titles[type] || '' });
+    setAvailDetailLoading(true);
+    try {
+      const res = await analyticsAPI.getAvailabilityDetail();
+      setAvailDetail(res.data || []);
+    } catch {
+      message.error('Failed to load availability detail');
+    } finally {
+      setAvailDetailLoading(false);
+    }
+  }, []);
 
   useEffect(() => { fetchData(); }, []); // eslint-disable-line
 
@@ -333,6 +360,15 @@ const DashboardHome = () => {
   const leavingIn60Days    = s.leavingIn60Days    || 0;
   const leavingIn90Days    = s.leavingIn90Days    || 0;
 
+  // ── Bed stats from /analytics API ────────────────────────────────────────
+  const totalBeds     = analyticsData?.totalBeds     || 0;
+  const occupiedBeds  = analyticsData?.occupiedBeds  || 0;
+  const availableBeds = analyticsData?.availableBeds || 0;
+  const bedOccupancyPct = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
+
+  // ── Unit breakdown from /analytics API ────────────────────────────────────
+  const unitBreakdown = analyticsData?.unitBreakdown || [];
+
   // ── Chart data ─────────────────────────────────────────────────────────
   const propertyPieData = [
     { type: 'Occupied', value: occupiedResidences },
@@ -423,15 +459,18 @@ const DashboardHome = () => {
   const deptCountConfig = {
     data: deptCountData, xField: 'dept', yField: 'count',
     color: '#1890ff',
+    columnWidthRatio: 0.55,
     label: { position: 'top', style: { fill: '#262626', fontSize: 11, fontWeight: 700 } },
     xAxis: colXAxis,
-    yAxis: { title: { text: 'Employees' } },
+    yAxis: { title: { text: 'Employees' }, min: 0 },
+    meta: { count: { min: 0 } },
     tooltip: { formatter: (d) => ({ name: 'Employees', value: d.count }) },
   };
 
   const deptRentConfig = {
     data: deptRentData, xField: 'dept', yField: 'rent',
     color: '#E87103',
+    columnWidthRatio: 0.55,
     label: {
       position: 'top',
       style: { fill: '#262626', fontSize: 10, fontWeight: 700 },
@@ -440,36 +479,42 @@ const DashboardHome = () => {
     xAxis: colXAxis,
     yAxis: {
       title: { text: 'Monthly Rent' },
+      min: 0,
       label: { formatter: (v) => {
         const n = parseFloat(v) || 0;
         if (n >= 100000) return `₹${(n / 100000).toFixed(0)}L`;
         return `₹${(n / 1000).toFixed(0)}K`;
       }},
     },
+    meta: { rent: { min: 0 } },
     tooltip: { formatter: (d) => ({ name: 'Monthly Rent', value: `₹${Number(d.rent).toLocaleString('en-IN')}` }) },
   };
 
   const advanceConfig = {
     data: advanceData, xField: 'stage', yField: 'amount',
     color: ({ stage }) => stage === 'Locked (Active)' ? '#E87103' : stage === 'Received Back' ? '#52c41a' : '#f5222d',
+    columnWidthRatio: 0.55,
     label: {
       position: 'top',
       style: { fill: '#262626', fontSize: 11, fontWeight: 700 },
       formatter: safeAmtFmt,
     },
-    yAxis: { label: { formatter: (v) => {
+    yAxis: { min: 0, label: { formatter: (v) => {
       const n = parseFloat(v) || 0;
       if (n >= 100000) return `₹${(n / 100000).toFixed(0)}L`;
       return `₹${(n / 1000).toFixed(0)}K`;
     }}},
+    meta: { amount: { min: 0 } },
     tooltip: { formatter: (d) => ({ name: d.stage, value: `₹${Number(d.amount).toLocaleString('en-IN')}` }) },
   };
 
   const renewalConfig = {
     data: renewalAlertData, xField: 'status', yField: 'count',
     color: ({ status }) => status === 'Past Due' ? '#f5222d' : status === 'Due (90 Days)' ? '#faad14' : '#1890ff',
+    columnWidthRatio: 0.55,
     label: { position: 'top', style: { fill: '#262626', fontSize: 13, fontWeight: 700 } },
-    yAxis: { title: { text: 'Count' } },
+    yAxis: { title: { text: 'Count' }, min: 0 },
+    meta: { count: { min: 0 } },
     tooltip: { formatter: (d) => ({ name: d.status, value: d.count }) },
   };
 
@@ -978,6 +1023,65 @@ const DashboardHome = () => {
     </div>
   );
 
+  // ── Unit-Wise Content ──────────────────────────────────────────────────────
+  const UnitContent = () => {
+    const unitCols = [
+      { title: 'Business Unit', dataIndex: 'unit', key: 'unit' },
+      { title: 'Employees', dataIndex: 'employees', key: 'employees', sorter: (a,b) => a.employees - b.employees },
+      { title: 'Active Agreements', dataIndex: 'agreements', key: 'agreements' },
+      { title: 'Monthly Rent', dataIndex: 'rent', key: 'rent', render: (v) => fmtCFull(v), sorter: (a,b) => a.rent - b.rent },
+      { title: 'Cost per Employee', key: 'cpe', render: (_, r) => r.employees > 0 ? fmtCFull(r.rent / r.employees) : '—', sorter: (a,b) => (a.rent/Math.max(a.employees,1)) - (b.rent/Math.max(b.employees,1)) },
+    ];
+    const unitBarData = unitBreakdown.map(u => ({ unit: u.unit.length > 14 ? u.unit.substring(0,14)+'…' : u.unit, employees: u.employees, rent: u.rent }));
+    return (
+      <div>
+        <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+          {unitBreakdown.map(u => (
+            <Col xs={12} sm={8} md={6} key={u.unit}>
+              <Card size="small" style={{ borderTop: '3px solid #1890ff' }} bodyStyle={{ padding: '10px 14px' }}>
+                <div style={{ fontSize: 11, color: '#595959', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>{u.unit}</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: '#1890ff' }}>{u.employees} <span style={{ fontSize: 12, color: '#8c8c8c', fontWeight: 400 }}>employees</span></div>
+                <div style={{ fontSize: 12, color: '#52c41a' }}>{fmtC(u.rent)} / month</div>
+                <div style={{ fontSize: 11, color: '#8c8c8c' }}>{u.employees > 0 ? `${fmtC(u.rent / u.employees)} / head` : '—'}</div>
+              </Card>
+            </Col>
+          ))}
+        </Row>
+        {unitBarData.length > 0 && (
+          <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+            <Col xs={24} md={12}>
+              <Card title="Unit-Wise Employee Count" size="small">
+                <Column data={unitBarData} xField="unit" yField="employees" color="#1890ff" columnWidthRatio={0.55}
+                  label={{ position: 'top', style: { fill: '#262626', fontSize: 11, fontWeight: 700 } }}
+                  yAxis={{ min: 0 }} meta={{ employees: { min: 0 } }}
+                  height={260}
+                  tooltip={{ formatter: (d) => ({ name: 'Employees', value: d.employees }) }} />
+              </Card>
+            </Col>
+            <Col xs={24} md={12}>
+              <Card title="Unit-Wise Monthly Rent" size="small">
+                <Column data={unitBarData} xField="unit" yField="rent" color="#E87103" columnWidthRatio={0.55}
+                  label={{ position: 'top', style: { fill: '#262626', fontSize: 10, fontWeight: 700 }, formatter: safeRentFmt }}
+                  yAxis={{ min: 0, label: { formatter: (v) => { const n = parseFloat(v)||0; return n>=100000?`₹${(n/100000).toFixed(0)}L`:`₹${(n/1000).toFixed(0)}K`; } } }}
+                  meta={{ rent: { min: 0 } }}
+                  height={260}
+                  tooltip={{ formatter: (d) => ({ name: 'Rent', value: `₹${Number(d.rent).toLocaleString('en-IN')}` }) }} />
+              </Card>
+            </Col>
+          </Row>
+        )}
+        <TCard
+          title="Unit-Wise Summary Table"
+          icon={<AppstoreOutlined />}
+          dataSource={unitBreakdown}
+          rowKey="unit"
+          exportName="Unit_Wise_Summary"
+          columns={unitCols}
+        />
+      </div>
+    );
+  };
+
   // ── Tabs definition ──────────────────────────────────────────────────────
   const tabItems = [
     {
@@ -1024,6 +1128,11 @@ const DashboardHome = () => {
       key: 'properties',
       label: <span><HomeOutlined /> Properties</span>,
       children: <PropertyContent />,
+    },
+    {
+      key: 'units',
+      label: <span><AppstoreOutlined /> Unit-Wise</span>,
+      children: <UnitContent />,
     },
   ];
 
@@ -1100,18 +1209,44 @@ const DashboardHome = () => {
             sub={`${utilizationPct}% utilization`} />
         </Col>
         <Col xs={12} sm={8} md={4}>
-          <KCard title="Vacant (Active)" value={vacantResidences}
+          <KCard title="Vacant Properties" value={vacantResidences}
             color={vacantResidences > 3 ? '#faad14' : '#52c41a'}
-            sub="Available for allocation" />
+            sub="Click to view details"
+            clickFn={() => openAvailModal('properties')} />
         </Col>
         <Col xs={12} sm={8} md={4}>
           <KCard title="Total Rooms" value={totalRooms} color="#722ed1"
             sub={`${occupiedRooms} occupied`} />
         </Col>
         <Col xs={12} sm={8} md={4}>
-          <KCard title="Room Occupancy" value={roomOccupancyPct} suffix="%"
-            color={roomOccupancyPct >= 80 ? '#52c41a' : roomOccupancyPct >= 60 ? '#faad14' : '#f5222d'}
-            sub={`${vacantRooms} rooms vacant`} />
+          <KCard title="Vacant Rooms" value={vacantRooms}
+            color={vacantRooms > 5 ? '#faad14' : '#52c41a'}
+            sub="Click to view details"
+            clickFn={() => openAvailModal('rooms')} />
+        </Col>
+      </Row>
+
+      {/* ── Availability Summary Strip ── */}
+      <SLabel>Bed Availability</SLabel>
+      <Row gutter={[10, 10]} style={{ marginBottom: 16 }}>
+        <Col xs={12} sm={8} md={6}>
+          <KCard title="Total Beds" value={totalBeds} color="#262626"
+            sub={`${bedOccupancyPct}% occupied`} />
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <KCard title="Occupied Beds" value={occupiedBeds} color="#1890ff"
+            sub="Currently allocated" />
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <KCard title="Available Beds" value={availableBeds}
+            color={availableBeds > 0 ? '#52c41a' : '#f5222d'}
+            sub="Click to see bed-level detail"
+            clickFn={() => openAvailModal('beds')} />
+        </Col>
+        <Col xs={12} sm={8} md={6}>
+          <KCard title="Bed Occupancy" value={bedOccupancyPct} suffix="%"
+            color={bedOccupancyPct >= 80 ? '#52c41a' : bedOccupancyPct >= 60 ? '#faad14' : '#f5222d'}
+            sub={`${occupiedBeds} of ${totalBeds} beds filled`} />
         </Col>
       </Row>
 
@@ -1197,6 +1332,119 @@ const DashboardHome = () => {
         items={tabItems}
         style={{ background: '#fff', borderRadius: 8 }}
       />
+
+      {/* ── Availability Detail Modal ── */}
+      <Modal
+        title={<Space><ShopOutlined />{availModal.title}</Space>}
+        open={availModal.open}
+        onCancel={() => setAvailModal({ open: false, type: null, title: '' })}
+        footer={<Button onClick={() => setAvailModal({ open: false, type: null, title: '' })}>Close</Button>}
+        width={820}
+        destroyOnClose
+      >
+        {availDetailLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" tip="Loading…" /></div>
+        ) : (
+          <div>
+            {availModal.type === 'properties' && (
+              <div>
+                {availDetail.filter(p => (p.totalBeds - p.occupiedBeds > 0) || p.rooms.length === 0).length === 0
+                  ? <Alert type="success" message="No vacant properties at this time." showIcon />
+                  : availDetail
+                      .filter(p => p.vacantBeds > 0 || p.rooms.length === 0)
+                      .map(p => (
+                        <Card key={p.residence_id} size="small" style={{ marginBottom: 10, borderLeft: '4px solid #52c41a' }}>
+                          <Space style={{ justifyContent: 'space-between', width: '100%', flexWrap: 'wrap' }}>
+                            <div>
+                              <Text strong>{p.name}</Text>
+                              {p.address && <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>{p.address}</Text>}
+                            </div>
+                            <Space size="small">
+                              <Tag color="green">{p.vacantBeds} vacant beds</Tag>
+                              <Tag color="blue">{p.totalBeds} total</Tag>
+                            </Space>
+                          </Space>
+                          {p.owner && <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 4 }}>Owner: {p.owner} {p.owner_contact ? `· ${p.owner_contact}` : ''}</div>}
+                        </Card>
+                      ))}
+              </div>
+            )}
+            {availModal.type === 'rooms' && (
+              <div>
+                {availDetail.flatMap(p =>
+                  p.rooms.filter(r => r.vacantBeds > 0).map(r => (
+                    <Card key={`${p.residence_id}-${r.room_number}`} size="small" style={{ marginBottom: 8, borderLeft: '4px solid #faad14' }}>
+                      <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+                        <Text strong>{p.name} — Room {r.room_number}{r.floor_number ? ` (${r.floor_number})` : ''}</Text>
+                        <Tag color="orange">{r.vacantBeds} vacant of {r.totalBeds}</Tag>
+                      </Space>
+                    </Card>
+                  ))
+                )}
+                {availDetail.flatMap(p => p.rooms.filter(r => r.vacantBeds > 0)).length === 0 && (
+                  <Alert type="success" message="No vacant rooms at this time." showIcon />
+                )}
+              </div>
+            )}
+            {availModal.type === 'beds' && (
+              <div>
+                {availDetail.length === 0
+                  ? <Alert type="success" message="No availability data found." showIcon />
+                  : <Collapse
+                      items={availDetail.map(p => ({
+                        key: p.residence_id,
+                        label: (
+                          <Space>
+                            <Text strong>{p.name}</Text>
+                            <Badge count={p.vacantBeds} overflowCount={999}
+                              style={{ backgroundColor: p.vacantBeds > 0 ? '#52c41a' : '#bfbfbf' }}
+                              showZero />
+                            <Text type="secondary" style={{ fontSize: 12 }}>vacant beds</Text>
+                          </Space>
+                        ),
+                        children: (
+                          <div>
+                            {p.rooms.map(room => (
+                              <div key={room.room_number} style={{ marginBottom: 12 }}>
+                                <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 13, color: '#262626' }}>
+                                  Room {room.room_number}{room.floor_number ? ` — ${room.floor_number}` : ''}
+                                </div>
+                                <Row gutter={[8, 8]}>
+                                  {room.beds.map(bed => (
+                                    <Col xs={12} sm={8} md={6} key={bed.bed_id}>
+                                      <div style={{
+                                        padding: '6px 10px',
+                                        borderRadius: 6,
+                                        border: `1px solid ${bed.occupied ? '#d9d9d9' : '#52c41a'}`,
+                                        background: bed.occupied ? '#fafafa' : '#f6ffed',
+                                        fontSize: 12,
+                                      }}>
+                                        <div style={{ fontWeight: 600 }}>Bed {bed.bed_label}</div>
+                                        {bed.occupied ? (
+                                          <div style={{ color: '#595959' }}>
+                                            <div>👤 {bed.employee_name || bed.employee_id}</div>
+                                            {bed.department && <div style={{ color: '#8c8c8c' }}>{bed.department}</div>}
+                                            {bed.release_date && <div style={{ color: '#faad14' }}>Releasing: {bed.release_date}</div>}
+                                          </div>
+                                        ) : (
+                                          <div style={{ color: '#52c41a', fontWeight: 600 }}>✓ Available</div>
+                                        )}
+                                      </div>
+                                    </Col>
+                                  ))}
+                                </Row>
+                              </div>
+                            ))}
+                          </div>
+                        ),
+                      }))}
+                    />
+                }
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

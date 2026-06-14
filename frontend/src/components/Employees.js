@@ -18,6 +18,7 @@ import {
   Popconfirm,
   Alert,
   Tabs,
+  Divider,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined, PictureOutlined, UploadOutlined, DeleteOutlined, FolderOutlined } from '@ant-design/icons';
 import { employeeAPI, agreementAPI } from '../services/api';
@@ -364,6 +365,12 @@ const Employees = () => {
       render: (date) => date ? formatDateForDisplay(date) : 'N/A',
     },
     {
+      title: 'Mobile',
+      dataIndex: 'employee_mobile_number',
+      key: 'employee_mobile_number',
+      render: (v) => v || <Text type="secondary">—</Text>,
+    },
+    {
       title: 'Allocated Agreement',
       dataIndex: 'emplyee_allocated_agreement_id',
       key: 'emplyee_allocated_agreement_id',
@@ -597,8 +604,16 @@ const Employees = () => {
                     )}
                     <Form.Item name="employee_first_name" label="First Name"><Input /></Form.Item>
                     <Form.Item name="employee_last_name" label="Last Name"><Input /></Form.Item>
+                    <Form.Item name="employee_sir_name" label="Middle Name / Sir Name"><Input /></Form.Item>
                     <Form.Item name="employee_department" label="Department"><Input /></Form.Item>
                     <Form.Item name="employee_designation" label="Designation"><Input /></Form.Item>
+                    <Form.Item name="employee_mobile_number" label="Mobile Number">
+                      <Input placeholder="+91 98765 43210" />
+                    </Form.Item>
+                    <Form.Item name="employee_floor" label="Floor / Wing">
+                      <Input placeholder="e.g. 2nd Floor, Wing A" />
+                    </Form.Item>
+                    <Form.Item name="employee_room_number" label="Room Number"><Input /></Form.Item>
                     <Form.Item name="employee_date_of_joining" label="Date of Joining">
                       <DatePicker style={{ width: '100%' }} format="DD-MM-YYYY" />
                     </Form.Item>
@@ -614,6 +629,43 @@ const Employees = () => {
                         <Option value="Active">Active</Option>
                         <Option value="Inactive">Inactive</Option>
                       </Select>
+                    </Form.Item>
+                    <Form.Item name="employee_last_working_date" label="Last Working Date">
+                      <DatePicker style={{ width: '100%' }} format="DD-MM-YYYY" />
+                    </Form.Item>
+                    <Divider orientation="left" style={{ fontSize: 13, color: '#595959', margin: '12px 0' }}>
+                      Attrition / Retention
+                    </Divider>
+                    <Form.Item name="employee_date_of_resignation" label="Date of Resignation">
+                      <DatePicker style={{ width: '100%' }} format="DD-MM-YYYY" />
+                    </Form.Item>
+                    <Form.Item name="employee_resignation_reason" label="Reason for Resignation">
+                      <Select allowClear placeholder="Select reason">
+                        <Option value="Better Opportunity">Better Opportunity</Option>
+                        <Option value="Higher Studies">Higher Studies</Option>
+                        <Option value="Personal Reasons">Personal Reasons</Option>
+                        <Option value="Relocation">Relocation</Option>
+                        <Option value="Health Reasons">Health Reasons</Option>
+                        <Option value="Compensation">Compensation</Option>
+                        <Option value="Work Environment">Work Environment</Option>
+                        <Option value="Career Growth">Career Growth</Option>
+                        <Option value="Retirement">Retirement</Option>
+                        <Option value="Other">Other</Option>
+                      </Select>
+                    </Form.Item>
+                    <Form.Item name="employee_retention_status" label="Retention Status">
+                      <Select allowClear placeholder="N/A">
+                        <Option value="N/A">N/A</Option>
+                        <Option value="RETAINED">Retained</Option>
+                        <Option value="NOT_RETAINED">Not Retained</Option>
+                        <Option value="IN_DISCUSSION">In Discussion</Option>
+                      </Select>
+                    </Form.Item>
+                    <Form.Item name="employee_retention_date" label="Retention Date">
+                      <DatePicker style={{ width: '100%' }} format="DD-MM-YYYY" />
+                    </Form.Item>
+                    <Form.Item name="employee_retention_reason" label="Retention Reason">
+                      <Input.TextArea rows={2} placeholder="Why was the employee retained?" />
                     </Form.Item>
                     <Form.Item>
                       <Space>

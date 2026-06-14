@@ -176,11 +176,11 @@ class DbReader {
         residence_address_line_1, residence_address_line_2, residence_address_line_3,
         residence_state, residence_pin_code, residence_country,
         residence_house_count, residence_status,
-        residence_owner_contact, residence_area,
+        residence_owner_contact, residence_owner_phone, residence_area,
         residence_geo_location, residence_map_link,
         residence_owner_photo_ext,
         active_date, status_history, created_at, updated_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),NOW())
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW(),NOW())
       RETURNING *
     `, [
       id,
@@ -196,6 +196,7 @@ class DbReader {
       data.residence_house_count || 1,
       'active',
       data.residence_owner_contact || null,
+      data.residence_owner_phone   || null,
       data.residence_area  || null,
       data.residence_geo_location || null,
       data.residence_map_link || null,
@@ -220,7 +221,7 @@ class DbReader {
       'residence_owner_id','residence_owner_name','residence_door_number',
       'residence_address_line_1','residence_address_line_2','residence_address_line_3',
       'residence_state','residence_pin_code','residence_country',
-      'residence_house_count','residence_owner_contact','residence_area',
+      'residence_house_count','residence_owner_contact','residence_owner_phone','residence_area',
       'residence_geo_location','residence_map_link','residence_owner_photo_ext',
       'residence_owner_rating',
     ];
@@ -385,9 +386,11 @@ class DbReader {
         employee_date_of_joining, employee_status,
         employee_mobile_number, employee_room_number, employee_floor,
         employee_last_working_date, employee_notice_served,
+        employee_date_of_resignation, employee_resignation_reason,
+        employee_retention_date, employee_retention_reason, employee_retention_status,
         employee_photo_ext,
         active_date, status_history, created_at, updated_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),NOW())
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW(),NOW())
       RETURNING *
     `, [
       data.employee_id,
@@ -404,6 +407,11 @@ class DbReader {
       data.employee_floor         || null,
       data.employee_last_working_date || null,
       !!(data.employee_notice_served),
+      data.employee_date_of_resignation || null,
+      data.employee_resignation_reason  || null,
+      data.employee_retention_date      || null,
+      data.employee_retention_reason    || null,
+      data.employee_retention_status    || 'N/A',
       data.employee_photo_ext || '',
       now,
       JSON.stringify(statusHistory),
@@ -442,6 +450,8 @@ class DbReader {
       'employee_date_of_joining','employee_mobile_number',
       'employee_room_number','employee_floor',
       'employee_last_working_date','employee_notice_served',
+      'employee_date_of_resignation','employee_resignation_reason',
+      'employee_retention_date','employee_retention_reason','employee_retention_status',
       'employee_photo_ext',
     ];
     allowed.forEach(col => { if (updates[col] !== undefined) fields[col] = updates[col]; });
@@ -483,8 +493,8 @@ class DbReader {
 
   async addBed(data) {
     const res = await pool.query(`
-      INSERT INTO bed_master (bed_id, residence_id, room_number, bed_label, bed_type, is_active, notes)
-      VALUES ($1, $2, $3, $4, $5, true, $6)
+      INSERT INTO bed_master (bed_id, residence_id, room_number, bed_label, bed_type, floor_number, is_active, notes)
+      VALUES ($1, $2, $3, $4, $5, $6, true, $7)
       ON CONFLICT (bed_id) DO NOTHING
       RETURNING *
     `, [
@@ -492,8 +502,9 @@ class DbReader {
       data.residence_id,
       data.room_number,
       data.bed_label,
-      data.bed_type || 'Standard',
-      data.notes || null,
+      data.bed_type    || 'Standard',
+      data.floor_number || null,
+      data.notes        || null,
     ]);
     return res.rows[0] || null;
   }
@@ -501,13 +512,14 @@ class DbReader {
   async updateBed(bedId, data) {
     const res = await pool.query(`
       UPDATE bed_master SET
-        bed_type = COALESCE($2, bed_type),
-        is_active = COALESCE($3, is_active),
-        notes = $4,
-        updated_at = NOW()
+        bed_type     = COALESCE($2, bed_type),
+        floor_number = COALESCE($3, floor_number),
+        is_active    = COALESCE($4, is_active),
+        notes        = $5,
+        updated_at   = NOW()
       WHERE bed_id = $1
       RETURNING *
-    `, [bedId, data.bed_type || null, data.is_active ?? null, data.notes ?? null]);
+    `, [bedId, data.bed_type || null, data.floor_number || null, data.is_active ?? null, data.notes ?? null]);
     return res.rows[0] || null;
   }
 

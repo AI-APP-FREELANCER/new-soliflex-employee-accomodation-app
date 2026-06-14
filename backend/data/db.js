@@ -92,6 +92,26 @@ async function runStartupMigrations() {
        ON file_uploads(entity_type, entity_id)`,
     `CREATE INDEX IF NOT EXISTS idx_file_uploads_doc_type
        ON file_uploads(entity_type, entity_id, doc_type)`,
+
+    // ── Floor number on bed_master (Phase 2) ─────────────────────────────────
+    `ALTER TABLE bed_master
+       ADD COLUMN IF NOT EXISTS floor_number VARCHAR(30)`,
+
+    // ── Employee attrition/retention tracking (Phase 2) ──────────────────────
+    `ALTER TABLE employee_master
+       ADD COLUMN IF NOT EXISTS employee_date_of_resignation  DATE`,
+    `ALTER TABLE employee_master
+       ADD COLUMN IF NOT EXISTS employee_resignation_reason   TEXT`,
+    `ALTER TABLE employee_master
+       ADD COLUMN IF NOT EXISTS employee_retention_date       DATE`,
+    `ALTER TABLE employee_master
+       ADD COLUMN IF NOT EXISTS employee_retention_reason     TEXT`,
+    `ALTER TABLE employee_master
+       ADD COLUMN IF NOT EXISTS employee_retention_status     VARCHAR(20) DEFAULT 'N/A'`,
+
+    // ── Residence: separate owner phone field (Phase 2) ───────────────────────
+    `ALTER TABLE residence_master
+       ADD COLUMN IF NOT EXISTS residence_owner_phone VARCHAR(30)`,
   ];
   for (const sql of migrations) {
     await pool.query(sql).catch(() => {}); // ignore if already exists

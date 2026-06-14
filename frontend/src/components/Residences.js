@@ -373,6 +373,27 @@ const Residences = () => {
       ),
     },
     {
+      title: 'Owner Contact',
+      key: 'owner_contact',
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          {record.residence_owner_contact && (
+            <Text style={{ fontSize: 12 }}>
+              📞 {record.residence_owner_contact}
+            </Text>
+          )}
+          {record.residence_owner_phone && (
+            <Text style={{ fontSize: 12 }}>
+              📱 {record.residence_owner_phone}
+            </Text>
+          )}
+          {!record.residence_owner_contact && !record.residence_owner_phone && (
+            <Text type="secondary" style={{ fontSize: 12 }}>—</Text>
+          )}
+        </Space>
+      ),
+    },
+    {
       title: 'Status',
       dataIndex: 'residence_status',
       key: 'residence_status',
@@ -843,6 +864,20 @@ const Residences = () => {
             label="House Count"
           >
             <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+
+          <Form.Item
+            name="residence_owner_contact"
+            label="Owner Contact (Primary)"
+          >
+            <Input placeholder="e.g. +91 98765 43210" />
+          </Form.Item>
+
+          <Form.Item
+            name="residence_owner_phone"
+            label="Owner Phone (Secondary)"
+          >
+            <Input placeholder="e.g. +91 80 2345 6789" />
           </Form.Item>
 
           <Form.Item

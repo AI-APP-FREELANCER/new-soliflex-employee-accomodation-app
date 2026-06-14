@@ -8,6 +8,7 @@ import {
   UserOutlined,
   LogoutOutlined,
   DashboardOutlined,
+  FallOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -16,6 +17,7 @@ import Agreements from './Agreements';
 import Employees from './Employees';
 import DashboardHome from './DashboardHome';
 import BedManagement from './BedManagement';
+import Attrition from './Attrition';
 import { useResponsive } from '../utils/useResponsive';
 import '../App.css';
 
@@ -37,6 +39,7 @@ const Dashboard = () => {
     if (pathname.startsWith('/residences')) return 'residences';
     if (pathname.startsWith('/beds'))       return 'beds';
     if (pathname.startsWith('/analytics'))  return 'analytics';
+    if (pathname.startsWith('/attrition'))  return 'attrition';
     return 'dashboard';
   };
 
@@ -86,6 +89,11 @@ const Dashboard = () => {
       icon: <UserOutlined />,
       label: 'Employees',
     },
+    {
+      key: 'attrition',
+      icon: <FallOutlined />,
+      label: 'Attrition & Retention',
+    },
   ];
 
   const handleNavigateToAgreements = (filter) => {
@@ -111,6 +119,7 @@ const Dashboard = () => {
       'agreements': '/agreements',
       'employees':  '/employees',
       'analytics':  '/analytics',
+      'attrition':  '/attrition',
     };
     if (routeMap[key]) {
       navigate(routeMap[key]);
@@ -127,6 +136,8 @@ const Dashboard = () => {
         return <Agreements />;
       case 'employees':
         return <Employees />;
+      case 'attrition':
+        return <Attrition />;
       default:
         return <DashboardHome />;
     }
