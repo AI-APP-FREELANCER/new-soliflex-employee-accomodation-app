@@ -329,8 +329,7 @@ class DbReader {
       'agreement_employee_unit','agreement_advance_amount','agreement_monthly_rent_amount',
       'agreement_rent_per_house','agreement_advance_in_months',
       'agreement_scheduled_to_vacate','agreement_set_to_vacate','agreement_vacate_date',
-      'agreement_advance_due_back','agreement_advance_received','agreement_maintenance_cut',
-      'agreement_deduction_electricity','agreement_deduction_water','agreement_deduction_other',
+      // Refund amounts (due back, deductions, received) are maintained by refundService.
       'agreement_notice_period_days','agreement_notice_due_by_date',
       'agreement_statutory_status','agreement_document_location','agreement_company',
     ];
@@ -561,69 +560,6 @@ class DbReader {
       ORDER BY a.allocated_date DESC
     `, params);
     return res.rows;
-  }
-
-  /**
-   * Allocate a bed to an employee.
-   * - Prevents double allocation: raises an error if the bed already has an active allocation.
-   * - release_date is auto-set from the employee's last_working_date if available and not overridden.
-   */
-  async allocateBed(bedId, employeeId, allocatedDate, releaseDate, notes) {
-    // Check bed exists
-    const bedRes = await pool.query('SELECT * FROM bed_master WHERE bed_id = $1', [bedId]);
-    if (!bedRes.rows.length) throw new Error(`Bed ${bedId} not found`);
-
-    // Check for existing active allocation on this bed
-    const existing = await pool.query(
-      'SELECT a.alloc_id, a.employee_id, e.employee_first_name, e.employee_last_name FROM bed_allocations a LEFT JOIN employee_master e ON a.employee_id = e.employee_id WHERE a.bed_id = $1 AND a.is_active = true LIMIT 1',
-      [bedId]
-    );
-    if (existing.rows.length) {
-      const occ = existing.rows[0];
-      const name = [occ.employee_first_name, occ.employee_last_name].filter(Boolean).join(' ') || occ.employee_id;
-      throw new Error(`Bed ${bedId} is already occupied by ${name} — release the current allocation first`);
-    }
-
-    // Check if employee already has an active allocation on another bed
-    const empBed = await pool.query(
-      'SELECT a.bed_id FROM bed_allocations a WHERE a.employee_id = $1 AND a.is_active = true LIMIT 1',
-      [employeeId]
-    );
-    if (empBed.rows.length) {
-      throw new Error(`Employee ${employeeId} is already allocated to bed ${empBed.rows[0].bed_id}. Release that allocation first.`);
-    }
-
-    // Auto-derive release_date from employee LWD if not provided
-    let effectiveReleaseDate = releaseDate || null;
-    if (!effectiveReleaseDate) {
-      const empRes = await pool.query('SELECT employee_last_working_date FROM employee_master WHERE employee_id = $1', [employeeId]);
-      if (empRes.rows.length && empRes.rows[0].employee_last_working_date) {
-        effectiveReleaseDate = formatDate(empRes.rows[0].employee_last_working_date);
-      }
-    }
-
-    const res = await pool.query(`
-      INSERT INTO bed_allocations (bed_id, employee_id, allocated_date, release_date, notes)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING *
-    `, [bedId, employeeId, allocatedDate || new Date().toISOString().split('T')[0], effectiveReleaseDate, notes || null]);
-    return res.rows[0];
-  }
-
-  /**
-   * Release a bed allocation. Sets is_active=false and stamps the release date/reason.
-   */
-  async releaseBed(allocId, releaseDate, reason) {
-    const res = await pool.query(`
-      UPDATE bed_allocations
-      SET is_active = false,
-          release_date = COALESCE($2, release_date, CURRENT_DATE),
-          release_reason = $3,
-          updated_at = NOW()
-      WHERE alloc_id = $1
-      RETURNING *
-    `, [allocId, releaseDate || null, reason || 'Released by HR']);
-    return res.rows[0] || null;
   }
 
   /**

@@ -6,6 +6,10 @@ const express = require('express');
 const router  = express.Router();
 const { authenticateToken } = require('../middleware/auth');
 const db = require('../data/excelReader');
+const pool = require('../data/db');
+const svc = require('../data/allocationService');
+
+const fail = (res, err) => res.status(err.status || 400).json({ error: err.message });
 
 router.use(authenticateToken);
 
@@ -52,10 +56,12 @@ router.post('/', async (req, res) => {
           room_number:  String(body.room_number),
           bed_label:    b.bed_label,
           bed_type:     b.bed_type || 'Standard',
+          floor_number: b.floor_number || null,
           notes:        b.notes || null,
         });
         if (created) results.push(created);
       }
+      await svc.syncRoom(pool, body.residence_id, String(body.room_number), body.beds[0]?.floor_number);
       return res.json(results);
     }
 
@@ -64,6 +70,7 @@ router.post('/', async (req, res) => {
       body.bed_id = `${body.residence_id}-R${String(body.room_number).padStart(2,'0')}-${body.bed_label}`;
     }
     const created = await db.addBed(body);
+    if (created) await svc.syncRoom(pool, created.residence_id, created.room_number, created.floor_number);
     res.json(created);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -75,6 +82,7 @@ router.put('/:bedId', async (req, res) => {
   try {
     const updated = await db.updateBed(req.params.bedId, req.body);
     if (!updated) return res.status(404).json({ error: 'Bed not found' });
+    await svc.syncRoom(pool, updated.residence_id, updated.room_number);
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -86,6 +94,7 @@ router.delete('/:bedId', async (req, res) => {
   try {
     const deleted = await db.deleteBed(req.params.bedId);
     if (!deleted) return res.status(404).json({ error: 'Bed not found' });
+    await svc.syncRoom(pool, deleted.residence_id, deleted.room_number);
     res.json({ success: true, deleted });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -114,11 +123,12 @@ router.get('/allocations', async (req, res) => {
 router.post('/:bedId/allocate', async (req, res) => {
   try {
     const { employee_id, allocated_date, release_date, notes } = req.body;
-    if (!employee_id) return res.status(400).json({ error: 'employee_id is required' });
-    const alloc = await db.allocateBed(req.params.bedId, employee_id, allocated_date, release_date, notes);
+    const alloc = await svc.allocate({
+      employee_id, bed_id: req.params.bedId, allocated_date, release_date, notes, user: req.user?.username,
+    });
     res.json(alloc);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    fail(res, err);
   }
 });
 
@@ -128,11 +138,12 @@ router.post('/:bedId/allocate', async (req, res) => {
 router.put('/allocations/:allocId/release', async (req, res) => {
   try {
     const { release_date, release_reason } = req.body;
-    const updated = await db.releaseBed(Number(req.params.allocId), release_date, release_reason);
-    if (!updated) return res.status(404).json({ error: 'Allocation not found' });
+    const updated = await svc.vacate({
+      alloc_id: Number(req.params.allocId), release_date, reason: release_reason, user: req.user?.username,
+    });
     res.json(updated);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    fail(res, err);
   }
 });
 

@@ -8,6 +8,7 @@ const router  = express.Router();
 const { authenticateToken } = require('../middleware/auth');
 const excelReader = require('../data/excelReader');
 const pool = require('../data/db');
+const allocationService = require('../data/allocationService');
 const {
   DOC_TYPES,
   getAllowedMimes,
@@ -227,14 +228,15 @@ router.put('/:id', async (req, res) => {
     if (newStatus === 'INACTIVE') {
       try {
         const releaseDate = updated.employee_last_working_date || new Date().toISOString().split('T')[0];
-        await pool.query(`
-          UPDATE bed_allocations
-          SET is_active = false, release_date = $2, release_reason = 'Employee Inactive / Left Organisation', updated_at = NOW()
-          WHERE employee_id = $1 AND is_active = true
-        `, [req.params.id, releaseDate]);
+        await allocationService.vacate({
+          employee_id: req.params.id,
+          release_date: releaseDate,
+          reason: 'Employee Inactive / Left Organisation',
+          user: req.user?.username,
+        });
       } catch (bedErr) {
-        // Non-fatal: log but don't fail the employee update
-        if (process.env.NODE_ENV === 'development') console.error('Bed auto-release error:', bedErr.message);
+        // Non-fatal (usually: employee had no bed). Log but don't fail the employee update.
+        if (process.env.NODE_ENV === 'development' && bedErr.status !== 404) console.error('Bed auto-release error:', bedErr.message);
       }
     }
 

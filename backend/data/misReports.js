@@ -1,176 +1,174 @@
 /**
- * MIS Reports - Builds all table data for the dashboard (table-only MIS).
- * Uses the DB-backed excelReader for agreements, employees, residences.
+ * MIS Reports - Builds all table data for the dashboard.
+ * Every figure comes from the shared accommodation snapshot so the KPI cards,
+ * tables and exports agree with each other (see accommodationSnapshot.js for
+ * the definitions of occupancy, allocation, rent share and refunds).
  */
-const excelReader = require('./excelReader');
+const { loadSnapshot } = require('./accommodationSnapshot');
 const dayjs = require('dayjs');
-const utc = require('dayjs/plugin/utc');
-const timezone = require('dayjs/plugin/timezone');
-
-dayjs.extend(utc);
-dayjs.extend(timezone);
-
-const parseCurrency = (val) => {
-  if (val === undefined || val === null || val === '') return 0;
-  if (typeof val === 'number') return val;
-  const clean = String(val).replace(/[^\d.-]/g, '');
-  const num = parseFloat(clean);
-  return isNaN(num) ? 0 : num;
-};
-
-const normalizeStatus = (status) => {
-  const s = String(status || '').trim().toLowerCase();
-  return s === 'inactive' ? 'inactive' : 'active';
-};
-
-const isAgreementActive = (a) => normalizeStatus(a.agreement_status || a.status) === 'active';
-const isEmployeeActive = (e) => String(e.employee_status || e.status || '').trim().toUpperCase() === 'ACTIVE';
-
-function getEmployeeName(e) {
-  const parts = [e.employee_first_name, e.employee_last_name, e.employee_sir_name].filter(Boolean);
-  return parts.join(' ').trim() || e.employee_id || '—';
-}
-
-function getResidenceAddressShort(r) {
-  if (!r) return '—';
-  return [r.residence_address_line_1, r.residence_address_line_2].filter(Boolean).join(', ') || r.residence_id || '—';
-}
 
 /**
- * Returns full MIS payload: ownerSummary, proactive pipeline tables, cost optimization, departmental, financial/compliance, byOwner.
+ * Returns full MIS payload: ownerSummary, occupancy & vacancy tables, pipeline tables,
+ * cost optimization, departmental, financial/compliance, byOwner.
  */
 async function getMISData() {
-  const today = dayjs.tz(dayjs(), 'Asia/Kolkata').startOf('day');
-  const [agreements, employees, residences] = await Promise.all([
-    excelReader.getAgreements('all'),
-    excelReader.getEmployees('all'),
-    excelReader.getResidences('all'),
-  ]);
+  const snap = await loadSnapshot();
+  const {
+    today, agreements, employees, residences,
+    residenceById, agreementById, residenceStats, employeeAllocation, rentShareByEmployee,
+    refunds, totals: t, units, unitName,
+  } = snap;
+  const { num, isActiveStatus, isEmployeeActive, isScheduledToVacate, employeeName, residenceLabel } = snap.helpers;
 
-  const agreementById = {};
-  const residenceById = {};
-  const employeeByAgreementId = {};
-  const agreementsByResidenceId = {};
-  agreements.forEach(a => {
-    agreementById[a.agreement_id] = a;
-    const rid = a.agreement_residence_id;
-    if (!agreementsByResidenceId[rid]) agreementsByResidenceId[rid] = [];
-    agreementsByResidenceId[rid].push(a);
-  });
-  residences.forEach(r => { residenceById[r.residence_id] = r; });
+  const shortAddress = (r) => (r ? ([r.residence_address_line_1, r.residence_address_line_2].filter(Boolean).join(', ') || r.residence_id) : '—');
+
+  // Active occupants of each agreement (room-allocated or linked to the residence).
+  const occupantsByAgreement = {};
   employees.forEach(e => {
-    const aid = e.emplyee_allocated_agreement_id;
-    if (aid) employeeByAgreementId[aid] = e;
+    if (!isEmployeeActive(e)) return;
+    const al = employeeAllocation[e.employee_id];
+    if (al.agreement_id) (occupantsByAgreement[al.agreement_id] ||= []).push(e);
   });
+  // Employees ever linked to an agreement (for vacated agreements, who lived there).
+  const linkedByAgreement = {};
+  employees.forEach(e => {
+    if (e.emplyee_allocated_agreement_id) (linkedByAgreement[e.emplyee_allocated_agreement_id] ||= []).push(e);
+  });
+  const occupantLabel = (agId) => {
+    const list = occupantsByAgreement[agId] || linkedByAgreement[agId] || [];
+    if (!list.length) return '—';
+    return list.length === 1 ? employeeName(list[0]) : `${employeeName(list[0])} +${list.length - 1} more`;
+  };
 
-  // --- Module 0: Owner's Summary ---
-  let totalMonthlyRent = 0, totalAdvanceLocked = 0, totalAdvanceDueBack = 0, totalNetReceived = 0;
-  let pastDue = 0, dueSoon = 0, totalScheduledToVacate = 0;
-  let activeEmployees = 0, inactiveEmployees = 0;
+  // ── Renewal counts ─────────────────────────────────────────────────────────
   const ninetyDaysFromNow = today.add(90, 'day');
-
+  let pastDue = 0, dueSoon = 0;
+  const renewalsPastDue = [];
+  const renewalsDueSoon = [];
   agreements.forEach(a => {
-    if (!isAgreementActive(a)) return;
-    totalMonthlyRent += parseCurrency(a.agreement_monthly_rent_amount);
-    totalAdvanceLocked += parseCurrency(a.agreement_advance_amount);
-  });
-  agreements.forEach(a => {
-    if (normalizeStatus(a.agreement_status || a.status) !== 'inactive') return;
-    const dueBack = parseCurrency(a.agreement_advance_due_back || a.agreement_advance_amount || 0);
-    const received = parseCurrency(a.agreement_advance_received || 0);
-    if (received === 0 || !a.agreement_advance_received) totalAdvanceDueBack += dueBack;
-  });
-  agreements.forEach(a => { totalNetReceived += parseCurrency(a.agreement_advance_received || 0); });
-  agreements.forEach(a => {
-    if (a.agreement_scheduled_to_vacate === true || a.agreement_scheduled_to_vacate === 'Yes' || a.agreement_scheduled_to_vacate === 'yes') totalScheduledToVacate++;
-  });
-  agreements.forEach(a => {
-    if (!isAgreementActive(a)) return;
+    if (!isActiveStatus(a.agreement_status)) return;
     const dueDate = a.agreement_renewal_due_date ? dayjs.tz(a.agreement_renewal_due_date, 'Asia/Kolkata').startOf('day') : null;
     if (!dueDate || !dueDate.isValid()) return;
-    if (dueDate.isBefore(today, 'day')) pastDue++;
-    else if (dueDate.isSame(today, 'day') || dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day')) dueSoon++;
-  });
-  employees.forEach(e => {
-    const s = String(e.employee_status || e.status || '').trim().toUpperCase();
-    if (s === 'ACTIVE') activeEmployees++; else inactiveEmployees++;
-  });
-
-  const totalProperties = residences.length;
-  const occupiedCount = residences.filter(r => {
-    const list = agreementsByResidenceId[r.residence_id] || [];
-    return list.some(a => isAgreementActive(a));
-  }).length;
-  const vacantCount = totalProperties - occupiedCount;
-  const utilizationPct = totalProperties > 0 ? Math.round((occupiedCount / totalProperties) * 100) : 0;
-
-  // Enhanced KPI stats for the professional dashboard
-  const activeResidences = residences.filter(r => normalizeStatus(r.residence_status || 'active') === 'active').length;
-  const inactiveResidences = totalProperties - activeResidences;
-  const totalRooms = residences.reduce((s, r) => s + (parseInt(r.residence_house_count, 10) || 0), 0);
-  const activeAgreementCount = agreements.filter(a => isAgreementActive(a)).length;
-  const occupiedRooms = activeAgreementCount; // each active agreement = 1 occupied unit
-  const vacantRooms = Math.max(0, totalRooms - occupiedRooms);
-  const roomOccupancyPct = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
-  const vacantResidences = Math.max(0, activeResidences - occupiedCount);
-  const allocatedEmployees = employees.filter(e => isEmployeeActive(e) && e.emplyee_allocated_agreement_id).length;
-  const unallocatedEmployees = Math.max(0, activeEmployees - allocatedEmployees);
-  const leavingIn30Days = employees.filter(e => {
-    const lwd = e.employee_last_working_date ? dayjs(e.employee_last_working_date) : null;
-    return lwd && lwd.isValid() && !lwd.isBefore(today, 'day') && lwd.isBefore(today.add(31, 'day'), 'day');
-  }).length;
-  const leavingIn60Days = employees.filter(e => {
-    const lwd = e.employee_last_working_date ? dayjs(e.employee_last_working_date) : null;
-    return lwd && lwd.isValid() && !lwd.isBefore(today, 'day') && lwd.isBefore(today.add(61, 'day'), 'day');
-  }).length;
-  const leavingIn90Days = employees.filter(e => {
-    const lwd = e.employee_last_working_date ? dayjs(e.employee_last_working_date) : null;
-    return lwd && lwd.isValid() && !lwd.isBefore(today, 'day') && lwd.isBefore(today.add(91, 'day'), 'day');
-  }).length;
-  let totalAdvancePending = 0;
-  agreements.forEach(a => {
-    const dueBack = parseCurrency(a.agreement_advance_due_back || a.agreement_advance_amount || 0);
-    const received = parseCurrency(a.agreement_advance_received || 0);
-    if (dueBack > received) totalAdvancePending += (dueBack - received);
+    const row = {
+      agreementId: a.agreement_id,
+      residenceId: a.agreement_residence_id,
+      employee: occupantLabel(a.agreement_id),
+      renewalDueDate: a.agreement_renewal_due_date,
+      monthlyRent: num(a.agreement_monthly_rent_amount),
+    };
+    if (dueDate.isBefore(today, 'day')) {
+      pastDue++;
+      renewalsPastDue.push({ ...row, daysPastDue: today.diff(dueDate, 'day') });
+    } else if (!dueDate.isAfter(ninetyDaysFromNow, 'day')) {
+      dueSoon++;
+      renewalsDueSoon.push({ ...row, daysUntilDue: dueDate.diff(today, 'day') });
+    }
   });
 
+  const vacatingAgreements = agreements.filter(a => isActiveStatus(a.agreement_status) && isScheduledToVacate(a));
+  const totalScheduledToVacate = vacatingAgreements.length;
+
+  const leavingWithin = (days) => employees.filter(e => {
+    if (!isEmployeeActive(e)) return false;
+    const lwd = e.employee_last_working_date ? dayjs(e.employee_last_working_date) : null;
+    return lwd && lwd.isValid() && !lwd.isBefore(today, 'day') && !lwd.isAfter(today.add(days, 'day'), 'day');
+  }).length;
+  const leavingIn30Days = leavingWithin(30);
+  const leavingIn60Days = leavingWithin(60);
+  const leavingIn90Days = leavingWithin(90);
+
+  const activeAllocated = t.employeesWithRoom + t.employeesResidenceOnly;
+  const utilizationPct = t.activeResidences > 0 ? Math.round((t.occupiedResidences / t.activeResidences) * 100) : 0;
+
+  // ── Module 0: Owner's Summary ──────────────────────────────────────────────
   const ownerSummary = [
-    { metric: 'Total Monthly Burn (Rent)', currentValue: totalMonthlyRent, monthOverMonthTrend: '—', actionRequired: '—' },
-    { metric: 'System Utilization (%)', currentValue: `${utilizationPct}%`, monthOverMonthTrend: '—', actionRequired: vacantCount > 0 ? `${vacantCount} properties vacant` : '—' },
+    { metric: 'Total Monthly Burn (Rent)', currentValue: t.monthlyRent, monthOverMonthTrend: '—', actionRequired: `${t.activeAgreements} active agreements` },
+    { metric: 'Bed Occupancy (%)', currentValue: `${t.occupancyPct}%`, monthOverMonthTrend: '—', actionRequired: t.vacantBeds > 0 ? `${t.vacantBeds} vacant beds across ${t.roomsWithVacancy} rooms` : '—' },
+    { metric: 'Total Bed Capacity', currentValue: t.bedCapacity, monthOverMonthTrend: '—', actionRequired: `${t.occupiedBeds} occupied · ${t.vacantBeds} vacant` },
+    { metric: 'Rooms (Full / Partial / Vacant)', currentValue: `${t.fullRooms} / ${t.partialRooms} / ${t.vacantRooms}`, monthOverMonthTrend: '—', actionRequired: `${t.totalRooms} rooms configured` },
+    { metric: 'Residences Without Room Setup', currentValue: t.residencesWithoutStructure, monthOverMonthTrend: '—', actionRequired: t.residencesWithoutStructure > 0 ? 'Add floors & rooms so occupancy is measured' : '—' },
+    { metric: 'Occupied Residences', currentValue: t.occupiedResidences, monthOverMonthTrend: '—', actionRequired: t.vacantResidences > 0 ? `${t.vacantResidences} active residences with no occupants` : '—' },
+    { metric: 'Active Employees', currentValue: t.activeEmployees, monthOverMonthTrend: '—', actionRequired: '—' },
+    { metric: 'Employees Allocated to a Room', currentValue: t.employeesWithRoom, monthOverMonthTrend: '—', actionRequired: t.employeesResidenceOnly > 0 ? `${t.employeesResidenceOnly} more linked to a residence but no room yet` : '—' },
+    { metric: 'Employees Not Allocated', currentValue: t.employeesUnallocated, monthOverMonthTrend: '—', actionRequired: t.employeesUnallocated > 0 ? 'Assign accommodation' : '—' },
+    { metric: 'Inactive Employees', currentValue: t.inactiveEmployees, monthOverMonthTrend: '—', actionRequired: t.bedsHeldByInactive > 0 ? `${t.bedsHeldByInactive} beds still held by inactive employees — release them` : '—' },
     { metric: 'Pipeline Ready (Scheduled to Vacate)', currentValue: totalScheduledToVacate, monthOverMonthTrend: '—', actionRequired: totalScheduledToVacate > 0 ? 'Map to upcoming vacancies' : '—' },
-    { metric: 'Advances at Risk (Due Back)', currentValue: totalAdvanceDueBack, monthOverMonthTrend: '—', actionRequired: totalAdvanceDueBack > 0 ? 'Follow up on refunds' : '—' },
     { metric: 'Past Due Renewals', currentValue: pastDue, monthOverMonthTrend: '—', actionRequired: pastDue > 0 ? 'Review past due agreements' : '—' },
     { metric: 'Due in 90 Days', currentValue: dueSoon, monthOverMonthTrend: '—', actionRequired: dueSoon > 0 ? 'Plan renewals' : '—' },
-    { metric: 'Total Properties', currentValue: totalProperties, monthOverMonthTrend: '—', actionRequired: '—' },
-    { metric: 'Active Employees', currentValue: activeEmployees, monthOverMonthTrend: '—', actionRequired: '—' },
-    { metric: 'Inactive Employees', currentValue: inactiveEmployees, monthOverMonthTrend: '—', actionRequired: '—' },
-    { metric: 'Active Residences', currentValue: activeResidences, monthOverMonthTrend: '—', actionRequired: inactiveResidences > 0 ? `${inactiveResidences} inactive` : '—' },
-    { metric: 'Occupied Residences', currentValue: occupiedCount, monthOverMonthTrend: '—', actionRequired: vacantResidences > 0 ? `${vacantResidences} active but vacant` : '—' },
-    { metric: 'Total Room Capacity', currentValue: totalRooms, monthOverMonthTrend: '—', actionRequired: `${occupiedRooms} occupied · ${vacantRooms} vacant` },
-    { metric: 'Room Occupancy (%)', currentValue: `${roomOccupancyPct}%`, monthOverMonthTrend: '—', actionRequired: roomOccupancyPct < 70 ? 'Optimize room allocation' : '—' },
-    { metric: 'Allocated Employees', currentValue: allocatedEmployees, monthOverMonthTrend: '—', actionRequired: unallocatedEmployees > 0 ? `${unallocatedEmployees} active employees unallocated` : '—' },
+    { metric: 'Advance Locked (Active Agreements)', currentValue: t.advanceLocked, monthOverMonthTrend: '—', actionRequired: '—' },
+    { metric: 'Advance Refund Outstanding', currentValue: t.refundOutstanding, monthOverMonthTrend: '—', actionRequired: t.refundOutstanding > 0 ? `${t.refundCasesOpen} vacated agreements — follow up with landlords` : '—' },
+    { metric: 'Advance Refund Received', currentValue: t.refundReceived, monthOverMonthTrend: '—', actionRequired: '—' },
+    { metric: 'Advance Refunds Upcoming (Vacating)', currentValue: t.refundUpcoming, monthOverMonthTrend: '—', actionRequired: t.refundUpcoming > 0 ? 'Request refund on vacating' : '—' },
     { metric: 'Employees Leaving ≤30 Days', currentValue: leavingIn30Days, monthOverMonthTrend: '—', actionRequired: leavingIn30Days > 0 ? 'Urgent — plan accommodation transitions' : '—' },
-    { metric: 'Employees Leaving ≤60 Days', currentValue: leavingIn60Days, monthOverMonthTrend: '—', actionRequired: leavingIn60Days > 0 ? 'Start replacement planning' : '—' },
-    { metric: 'Advance Pending Refund', currentValue: totalAdvancePending, monthOverMonthTrend: '—', actionRequired: totalAdvancePending > 0 ? 'Follow up with landlords' : '—' },
     { metric: 'Report Date', currentValue: today.format('DD-MM-YYYY'), monthOverMonthTrend: '—', actionRequired: '—' },
   ];
 
-  // --- Module 1: Proactive Pipeline ---
+  // ── Occupancy & vacancy (room level) ───────────────────────────────────────
+  const residenceOccupancy = Object.values(residenceStats)
+    .filter(r => r.status === 'active')
+    .map(r => ({
+      residenceId: r.residence_id,
+      residence: r.name,
+      owner: r.owner || '—',
+      unit: r.unit,
+      floors: r.floors.length,
+      rooms: r.totalRooms,
+      capacity: r.capacity,
+      occupied: r.occupied,
+      vacant: r.vacant,
+      occupancyPct: r.occupancyPct,
+      fullRooms: r.fullRooms,
+      partialRooms: r.partialRooms,
+      vacantRooms: r.vacantRooms,
+      residentsWithoutRoom: r.residentsWithoutRoom.length,
+      setupStatus: r.structureConfigured ? 'Configured' : 'Room setup pending',
+    }))
+    .sort((a, b) => b.vacant - a.vacant || a.residenceId.localeCompare(b.residenceId));
+
+  const roomVacancy = [];
+  Object.values(residenceStats).forEach(r => {
+    if (r.status !== 'active') return;
+    r.rooms.filter(room => room.countable).forEach(room => {
+      roomVacancy.push({
+        roomId: room.room_id,
+        residenceId: r.residence_id,
+        residence: r.name,
+        unit: r.unit,
+        floor: room.floor_number || '—',
+        room: room.room_number,
+        roomType: room.room_type || '—',
+        capacity: room.capacity,
+        occupied: room.occupied,
+        vacant: room.vacant,
+        occupancyPct: room.occupancyPct,
+        status: room.status,
+        occupants: room.beds.filter(b => b.occupied).map(b => b.allocation.employee_name).join(', ') || '—',
+      });
+    });
+  });
+  roomVacancy.sort((a, b) => b.vacant - a.vacant || a.residenceId.localeCompare(b.residenceId) || String(a.room).localeCompare(String(b.room)));
+
+  // ── Module 1: Proactive Pipeline ───────────────────────────────────────────
+  const allocationLabel = (e) => {
+    const al = employeeAllocation[e.employee_id];
+    if (!al.residence_id) return '—';
+    const r = residenceById[al.residence_id];
+    const base = `${al.residence_id} ${shortAddress(r)}`;
+    return al.type === 'ROOM' ? `${base} · Room ${al.room_number}` : base;
+  };
+
   const upcomingVacancyReplacementTracker = [];
   const lwdWindowEnd = today.add(60, 'day');
   employees.forEach(e => {
+    if (!isEmployeeActive(e)) return;
     const lwd = e.employee_last_working_date ? dayjs(e.employee_last_working_date) : null;
-    if (!lwd || !lwd.isValid()) return;
-    if (lwd.isBefore(today, 'day')) return;
-    if (lwd.isAfter(lwdWindowEnd)) return;
-    const ag = e.emplyee_allocated_agreement_id ? agreementById[e.emplyee_allocated_agreement_id] : null;
-    const res = ag && ag.agreement_residence_id ? residenceById[ag.agreement_residence_id] : null;
+    if (!lwd || !lwd.isValid() || lwd.isBefore(today, 'day') || lwd.isAfter(lwdWindowEnd)) return;
     upcomingVacancyReplacementTracker.push({
-      employeeName: getEmployeeName(e),
+      employeeName: employeeName(e),
       department: e.employee_department || '—',
       projectedLWD: e.employee_last_working_date,
-      noticeStatus: e.employee_notice_served ? 'Ready for Inspection' : '—',
-      allocatedResidence: res ? `${res.residence_id} ${getResidenceAddressShort(res)}` : '—',
+      noticeStatus: e.employee_notice_served ? 'Notice served' : '—',
+      allocatedResidence: allocationLabel(e),
       replacementCandidate: '—',
       transitionBuffer: '—',
       daysLeft: lwd.diff(today, 'day'),
@@ -180,259 +178,239 @@ async function getMISData() {
 
   const propertiesBecomingAvailable = [];
   const windowEnd = today.add(90, 'day');
-  agreements.forEach(a => {
-    if (!(a.agreement_scheduled_to_vacate === true || a.agreement_scheduled_to_vacate === 'Yes' || a.agreement_scheduled_to_vacate === 'yes')) return;
+  vacatingAgreements.forEach(a => {
     const vd = a.agreement_vacate_date ? dayjs(a.agreement_vacate_date) : null;
-    if (!vd || !vd.isValid()) return;
-    if (vd.isBefore(today, 'day')) return;
-    if (vd.isAfter(windowEnd)) return;
+    if (!vd || !vd.isValid() || vd.isBefore(today, 'day') || vd.isAfter(windowEnd)) return;
     const res = residenceById[a.agreement_residence_id];
-    const emp = employeeByAgreementId[a.agreement_id];
+    const occ = occupantsByAgreement[a.agreement_id] || [];
     propertiesBecomingAvailable.push({
       residenceId: a.agreement_residence_id,
       ownerName: res ? res.residence_owner_name : '—',
       vacateDate: a.agreement_vacate_date,
-      currentEmployee: emp ? getEmployeeName(emp) : '—',
-      currentEmployeeId: emp ? emp.employee_id : '—',
-      department: emp ? emp.employee_department : '—',
+      currentEmployee: occupantLabel(a.agreement_id),
+      currentEmployeeId: occ[0]?.employee_id || '—',
+      department: occ[0]?.employee_department || '—',
       agreementId: a.agreement_id,
       daysUntilAvailable: vd.diff(today, 'day'),
     });
   });
   propertiesBecomingAvailable.sort((a, b) => (a.vacateDate || '').localeCompare(b.vacateDate || ''));
 
-  const replacementPlanningSummary = [];
-  agreements.forEach(a => {
-    if (!(a.agreement_scheduled_to_vacate === true || a.agreement_scheduled_to_vacate === 'Yes' || a.agreement_scheduled_to_vacate === 'yes')) return;
+  const replacementPlanningSummary = vacatingAgreements.map(a => {
     const res = residenceById[a.agreement_residence_id];
-    const emp = employeeByAgreementId[a.agreement_id];
-    replacementPlanningSummary.push({
+    const occ = occupantsByAgreement[a.agreement_id] || [];
+    return {
       residenceId: a.agreement_residence_id,
       owner: res ? res.residence_owner_name : '—',
       vacateDate: a.agreement_vacate_date,
-      outgoingEmployee: emp ? getEmployeeName(emp) : '—',
-      outgoingEmployeeId: emp ? emp.employee_id : '—',
-      department: emp ? emp.employee_department : '—',
-      lastWorkingDate: emp ? emp.employee_last_working_date : '—',
-      advanceDueBack: parseCurrency(a.agreement_advance_due_back || a.agreement_advance_amount),
+      outgoingEmployee: occupantLabel(a.agreement_id),
+      outgoingEmployeeId: occ[0]?.employee_id || '—',
+      department: occ[0]?.employee_department || '—',
+      lastWorkingDate: occ[0]?.employee_last_working_date || '—',
+      advanceDueBack: refunds[a.agreement_id].expected,
       replacementCandidate: '—',
-      suggestedAction: 'Plan next allocation',
-    });
-  });
-  replacementPlanningSummary.sort((a, b) => (a.vacateDate || '').localeCompare(b.vacateDate || ''));
+      suggestedAction: occ.length > 0 ? `Re-house ${occ.length} employee(s) before vacating` : 'Plan next allocation',
+    };
+  }).sort((a, b) => (a.vacateDate || '').localeCompare(b.vacateDate || ''));
 
-  // --- Module 2: Cost Optimization ---
-  const propertyUtilizationOpportunityCost = [];
-  residences.forEach(r => {
-    const list = agreementsByResidenceId[r.residence_id] || [];
-    const activeAgreements = list.filter(a => isAgreementActive(a));
-    const capacity = parseInt(r.residence_house_count, 10) || 1;
-    const occupancy = activeAgreements.length;
+  // ── Module 2: Cost Optimization ────────────────────────────────────────────
+  const propertyUtilizationOpportunityCost = residenceOccupancy.map(r => {
+    const rent = residenceStats[r.residenceId].monthly_rent;
     let suggestion = '—';
-    if (capacity > 1 && occupancy < capacity) suggestion = 'Consider full allocation';
-    if (occupancy === 0 && list.length > 0) suggestion = 'Vacant - reallocate';
-    propertyUtilizationOpportunityCost.push({
-      residenceId: r.residence_id,
-      address: getResidenceAddressShort(r),
-      capacity,
-      occupancy,
+    if (r.setupStatus !== 'Configured') suggestion = 'Set up floors & rooms to track occupancy';
+    else if (r.capacity > 0 && r.occupied === 0) suggestion = 'Vacant — allocate or review agreement';
+    else if (r.vacant > 0) suggestion = `${r.vacant} bed(s) free — allocate before renting elsewhere`;
+    return {
+      residenceId: r.residenceId,
+      address: shortAddress(residenceById[r.residenceId]),
+      capacity: r.capacity,
+      occupancy: r.occupied,
+      vacant: r.vacant,
+      occupancyPct: r.occupancyPct,
+      monthlyRent: rent,
+      vacancyCost: r.capacity > 0 ? Math.round((rent / r.capacity) * r.vacant) : 0,
       vacancyDays: '—',
-      lostRent: '—',
+      lostRent: r.capacity > 0 ? Math.round((rent / r.capacity) * r.vacant) : '—',
       optimizationSuggestion: suggestion,
-    });
+    };
   });
 
   const costByProperty = [];
   agreements.forEach(a => {
-    if (!isAgreementActive(a)) return;
+    if (!isActiveStatus(a.agreement_status)) return;
     const res = residenceById[a.agreement_residence_id];
-    const emp = employeeByAgreementId[a.agreement_id];
-    const rent = parseCurrency(a.agreement_monthly_rent_amount);
-    const advance = parseCurrency(a.agreement_advance_amount);
-    const capacity = res ? (parseInt(res.residence_house_count, 10) || 1) : 1;
+    const stats = residenceStats[a.agreement_residence_id];
+    const rent = num(a.agreement_monthly_rent_amount);
+    const occupants = (occupantsByAgreement[a.agreement_id] || []).length;
     costByProperty.push({
       residenceId: a.agreement_residence_id,
       ownerName: res ? res.residence_owner_name : '—',
-      address: getResidenceAddressShort(res),
+      address: shortAddress(res),
+      unit: unitName(a.agreement_employee_unit),
       monthlyRent: rent,
-      advanceLocked: advance,
-      agreementStatus: a.agreement_status || 'Active',
-      employee: emp ? getEmployeeName(emp) : '—',
-      costPerHead: capacity > 1 ? (rent / capacity).toFixed(2) : rent,
+      advanceLocked: num(a.agreement_advance_amount),
+      agreementStatus: 'Active',
+      employee: occupantLabel(a.agreement_id),
+      occupants,
+      capacity: stats ? stats.capacity : 0,
+      costPerHead: occupants > 0 ? Math.round(rent / occupants) : '—',
+      costPerBed: stats && stats.capacity > 0 ? Math.round(rent / stats.capacity) : '—',
     });
   });
 
-  const agreementROILedger = [];
-  agreements.forEach(a => {
+  const agreementROILedger = agreements.map(a => {
     const res = residenceById[a.agreement_residence_id];
-    const rent = parseCurrency(a.agreement_monthly_rent_amount);
-    const dueBack = parseCurrency(a.agreement_advance_due_back || a.agreement_advance_amount);
-    const received = parseCurrency(a.agreement_advance_received || 0);
-    const maintenance = parseCurrency(a.agreement_maintenance_cut || 0);
+    const rp = refunds[a.agreement_id];
+    const rent = num(a.agreement_monthly_rent_amount);
     const possession = a.agreement_possesion_date ? dayjs(a.agreement_possesion_date) : null;
     const tenureMonths = possession && possession.isValid() ? today.diff(possession, 'month') : null;
-    const maintenanceEfficiency = (tenureMonths != null && tenureMonths > 0 && rent > 0)
-      ? `${(maintenance / (tenureMonths * rent) * 100).toFixed(1)}%` : '—';
-    agreementROILedger.push({
+    const maintenanceEfficiency = (rp.isRefundCase && tenureMonths > 0 && rent > 0)
+      ? `${(rp.deductions / (tenureMonths * rent) * 100).toFixed(1)}%` : '—';
+    return {
       landlordName: res ? res.residence_owner_name : '—',
       agreementId: a.agreement_id,
       historicalRentHikes: '—',
-      advanceDueBack: dueBack,
-      advanceReceived: received,
-      advanceRecoveryStatus: received >= dueBack ? 'Closed' : (received > 0 ? 'Partial' : 'Pending'),
+      advanceDueBack: rp.isRefundCase ? rp.dueBack : 0,
+      advanceReceived: rp.received,
+      advanceRecoveryStatus: rp.stage,
       maintenanceEfficiency,
-    });
+    };
   });
 
-  // --- Module 3: Departmental MIS ---
-  const deptRent = {};
+  // ── Module 3: Departmental MIS ─────────────────────────────────────────────
   const deptCount = {};
+  const deptRent = {};
   employees.forEach(e => {
     const dept = (e.employee_department || 'Unassigned').trim();
-    if (!deptCount[dept]) { deptCount[dept] = { total: 0, active: 0, inactive: 0, allocated: 0, unallocated: 0 }; }
-    deptCount[dept].total++;
-    if (isEmployeeActive(e)) deptCount[dept].active++; else deptCount[dept].inactive++;
-    if (e.emplyee_allocated_agreement_id) deptCount[dept].allocated++; else deptCount[dept].unallocated++;
-    const ag = e.emplyee_allocated_agreement_id ? agreementById[e.emplyee_allocated_agreement_id] : null;
-    if (ag && isAgreementActive(ag)) {
-      deptRent[dept] = (deptRent[dept] || 0) + parseCurrency(ag.agreement_monthly_rent_amount);
-    }
+    const c = (deptCount[dept] ||= { total: 0, active: 0, inactive: 0, withRoom: 0, residenceOnly: 0, unallocated: 0 });
+    c.total++;
+    if (!isEmployeeActive(e)) { c.inactive++; return; }
+    c.active++;
+    const type = employeeAllocation[e.employee_id].type;
+    if (type === 'ROOM') c.withRoom++;
+    else if (type === 'RESIDENCE_ONLY') c.residenceOnly++;
+    else c.unallocated++;
+    if (rentShareByEmployee[e.employee_id]) deptRent[dept] = (deptRent[dept] || 0) + rentShareByEmployee[e.employee_id];
   });
 
-  const departmentalExpenseMatrix = [];
-  Object.keys(deptCount).sort().forEach(dept => {
-    const count = deptCount[dept];
-    const residentCount = count.allocated;
-    const cumulativeRent = deptRent[dept] || 0;
-    const costPerHead = residentCount > 0 ? (cumulativeRent / residentCount).toFixed(2) : '—';
-    departmentalExpenseMatrix.push({
+  const departmentalExpenseMatrix = Object.keys(deptCount).sort().map(dept => {
+    const c = deptCount[dept];
+    const residents = c.withRoom + c.residenceOnly;
+    const rent = Math.round(deptRent[dept] || 0);
+    return {
       department: dept,
-      totalResidentCount: residentCount,
-      cumulativeMonthlyRent: cumulativeRent,
-      costPerHead: costPerHead === '—' ? '—' : parseFloat(costPerHead),
+      totalResidentCount: residents,
+      cumulativeMonthlyRent: rent,
+      costPerHead: residents > 0 ? Math.round(rent / residents) : '—',
       budgetVariance: '—',
-    });
+    };
   });
 
   const designationMap = {};
   employees.forEach(e => {
+    if (!isEmployeeActive(e)) return;
     const des = (e.employee_designation || 'Unassigned').trim();
-    if (!designationMap[des]) designationMap[des] = { count: 0, rent: 0, tenures: [] };
-    designationMap[des].count++;
-    const ag = e.emplyee_allocated_agreement_id ? agreementById[e.emplyee_allocated_agreement_id] : null;
-    if (ag && isAgreementActive(ag)) {
-      designationMap[des].rent += parseCurrency(ag.agreement_monthly_rent_amount);
-      const pos = ag.agreement_possesion_date ? dayjs(ag.agreement_possesion_date) : null;
-      if (pos && pos.isValid()) designationMap[des].tenures.push(today.diff(pos, 'month'));
-    }
+    const d = (designationMap[des] ||= { count: 0, residents: 0, rent: 0, tenures: [] });
+    d.count++;
+    const al = employeeAllocation[e.employee_id];
+    if (!al.agreement_id) return;
+    d.residents++;
+    d.rent += rentShareByEmployee[e.employee_id] || 0;
+    const ag = agreementById[al.agreement_id];
+    const pos = ag?.agreement_possesion_date ? dayjs(ag.agreement_possesion_date) : null;
+    if (pos && pos.isValid()) d.tenures.push(today.diff(pos, 'month'));
   });
-  const designationWiseSpend = [];
-  Object.keys(designationMap).sort().forEach(des => {
+  const designationWiseSpend = Object.keys(designationMap).sort().map(des => {
     const d = designationMap[des];
-    const costPerHead = d.count > 0 && d.rent > 0 ? (d.rent / d.count).toFixed(2) : '—';
-    const avgTenure = d.tenures.length > 0
-      ? (d.tenures.reduce((s, t) => s + t, 0) / d.tenures.length).toFixed(1) + ' months'
-      : '—';
+    const perHead = d.residents > 0 ? d.rent / d.residents : 0;
     let accommodationGrade = '—';
-    if (d.rent > 0 && d.count > 0) {
-      const avg = d.rent / d.count;
-      if (avg > 25000) accommodationGrade = 'High'; else if (avg > 15000) accommodationGrade = 'Medium'; else accommodationGrade = 'Low';
-    }
-    designationWiseSpend.push({
+    if (perHead > 0) accommodationGrade = perHead > 25000 ? 'High' : perHead > 15000 ? 'Medium' : 'Low';
+    return {
       designation: des,
       count: d.count,
-      totalMonthlyRent: d.rent,
-      costPerHead: costPerHead === '—' ? '—' : parseFloat(costPerHead),
+      totalMonthlyRent: Math.round(d.rent),
+      costPerHead: perHead > 0 ? Math.round(perHead) : '—',
       accommodationGrade,
-      averageTenureInQuarters: avgTenure,
-    });
+      averageTenureInQuarters: d.tenures.length ? (d.tenures.reduce((s, x) => s + x, 0) / d.tenures.length).toFixed(1) + ' months' : '—',
+    };
   });
 
-  const departmentWiseEmployeeSummary = [];
-  Object.keys(deptCount).sort().forEach(dept => {
+  const departmentWiseEmployeeSummary = Object.keys(deptCount).sort().map(dept => {
     const c = deptCount[dept];
-    departmentWiseEmployeeSummary.push({
+    return {
       department: dept,
       totalEmployees: c.total,
       active: c.active,
       inactive: c.inactive,
-      allocated: c.allocated,
+      allocated: c.withRoom + c.residenceOnly,
+      withRoom: c.withRoom,
+      residenceOnly: c.residenceOnly,
       unallocated: c.unallocated,
-    });
-  });
-
-  const employeeMasterEnhanced = employees.map(e => {
-    const ag = e.emplyee_allocated_agreement_id ? agreementById[e.emplyee_allocated_agreement_id] : null;
-    const res = ag && ag.agreement_residence_id ? residenceById[ag.agreement_residence_id] : null;
-    return {
-      employeeId: e.employee_id,
-      name: getEmployeeName(e),
-      department: e.employee_department || '—',
-      designation: e.employee_designation || '—',
-      dateOfJoining: e.employee_date_of_joining || '—',
-      status: e.employee_status || '—',
-      allocatedResidenceId: res ? res.residence_id : '—',
-      agreementId: e.emplyee_allocated_agreement_id || '—',
-      renewalDue: ag ? ag.agreement_renewal_due_date : '—',
-      lastWorkingDate: e.employee_last_working_date || '—',
-      vacateDate: ag && (ag.agreement_scheduled_to_vacate === true || ag.agreement_scheduled_to_vacate === 'Yes' || ag.agreement_scheduled_to_vacate === 'yes') ? ag.agreement_vacate_date : '—',
     };
   });
 
-  // --- Module 4: Financial & Compliance ---
-  const refundPipeline30 = today.add(30, 'day');
-  let refundsInPipeline30 = 0;
-  agreements.forEach(a => {
-    if (!(a.agreement_scheduled_to_vacate === true || a.agreement_scheduled_to_vacate === 'Yes' || a.agreement_scheduled_to_vacate === 'yes')) return;
-    const vd = a.agreement_vacate_date ? dayjs(a.agreement_vacate_date) : null;
-    if (vd && vd.isValid() && !vd.isBefore(today, 'day') && !vd.isAfter(refundPipeline30)) {
-      refundsInPipeline30 += parseCurrency(a.agreement_advance_due_back || a.agreement_advance_amount || 0);
-    }
+  const employeeMasterEnhanced = employees.map(e => {
+    const al = employeeAllocation[e.employee_id];
+    const ag = al.agreement_id ? agreementById[al.agreement_id] : null;
+    return {
+      employeeId: e.employee_id,
+      name: employeeName(e),
+      department: e.employee_department || '—',
+      designation: e.employee_designation || '—',
+      dateOfJoining: e.employee_date_of_joining || '—',
+      status: isEmployeeActive(e) ? 'Active' : 'Inactive',
+      allocationStatus: !isEmployeeActive(e) ? '—' : al.type === 'ROOM' ? 'Room allocated' : al.type === 'RESIDENCE_ONLY' ? 'Room not assigned' : 'Not allocated',
+      allocatedResidenceId: al.residence_id || '—',
+      room: al.room_number ? `${al.floor_number ? al.floor_number + ' · ' : ''}Room ${al.room_number}` : '—',
+      agreementId: al.agreement_id || '—',
+      renewalDue: ag ? ag.agreement_renewal_due_date : '—',
+      lastWorkingDate: e.employee_last_working_date || '—',
+      vacateDate: ag && isScheduledToVacate(ag) ? ag.agreement_vacate_date : '—',
+    };
   });
 
-  const advanceRefundLiquidity = [];
-  agreements.forEach(a => {
-    const adv = parseCurrency(a.agreement_advance_amount || 0);
-    const dueBack = parseCurrency(a.agreement_advance_due_back || adv);
-    const received = parseCurrency(a.agreement_advance_received || 0);
-    if (adv === 0 && dueBack === 0) return;
+  // ── Module 4: Financial & Compliance ───────────────────────────────────────
+  const refundRow = (a) => {
+    const rp = refunds[a.agreement_id];
     const res = residenceById[a.agreement_residence_id];
-    const emp = employeeByAgreementId[a.agreement_id];
-    const netRealization = received - parseCurrency(a.agreement_maintenance_cut || 0);
-    advanceRefundLiquidity.push({
+    return {
       agreementId: a.agreement_id,
-      employee: emp ? getEmployeeName(emp) : '—',
+      residence: a.agreement_residence_id || '—',
       residenceLandlord: res ? res.residence_owner_name : '—',
-      totalAdvanceLocked: adv,
-      refundsInPipeline30: a.agreement_scheduled_to_vacate && a.agreement_vacate_date ? dueBack : 0,
-      advanceDueBack: dueBack,
-      advanceReceived: received,
-      netRefundRealization: netRealization,
+      employee: occupantLabel(a.agreement_id),
+      vacateDate: a.agreement_vacate_date || (a.inactiveDate ? a.inactiveDate.split('T')[0] : null),
+      advanceLocked: rp.advance,
+      advanceDueBack: rp.dueBack,
+      deductions: rp.deductions,
+      expectedRefund: rp.expected,
+      advanceReceived: rp.received,
+      pending: rp.outstanding,
+      status: rp.stage,
+      requestedDate: a.agreement_refund_requested_date || null,
+      followUpDate: a.agreement_refund_followup_date || null,
+      lastReceiptDate: rp.lastReceiptDate,
       landlordRating: res && res.residence_owner_rating ? res.residence_owner_rating : '—',
-    });
-  });
+    };
+  };
 
-  const advancePipeline = [];
-  agreements.forEach(a => {
-    const adv = parseCurrency(a.agreement_advance_amount || 0);
-    const dueBack = parseCurrency(a.agreement_advance_due_back || adv);
-    const received = parseCurrency(a.agreement_advance_received || 0);
-    if (adv === 0 && dueBack === 0) return;
-    const res = residenceById[a.agreement_residence_id];
-    const emp = employeeByAgreementId[a.agreement_id];
-    const pending = dueBack - received;
-    let status = 'Pending';
-    if (received >= dueBack) status = 'Closed'; else if (received > 0) status = 'Partially received';
-    advancePipeline.push({
-      agreementId: a.agreement_id,
-      residence: res ? res.residence_id : '—',
-      employee: emp ? getEmployeeName(emp) : '—',
-      advanceLocked: adv,
-      advanceDueBack: dueBack,
-      advanceReceived: received,
-      pending,
-      status,
-    });
+  const refundCases = agreements.filter(a => refunds[a.agreement_id].isRefundCase);
+  const advancePipeline = refundCases.map(refundRow).sort((a, b) => b.pending - a.pending);
+
+  const advanceRefundLiquidity = refundCases.map(a => {
+    const r = refundRow(a);
+    const vd = a.agreement_vacate_date ? dayjs(a.agreement_vacate_date) : null;
+    const in30 = vd && vd.isValid() && !vd.isBefore(today, 'day') && !vd.isAfter(today.add(30, 'day'));
+    return {
+      agreementId: r.agreementId,
+      employee: r.employee,
+      residenceLandlord: r.residenceLandlord,
+      totalAdvanceLocked: r.advanceLocked,
+      refundsInPipeline30: in30 ? r.expectedRefund : 0,
+      advanceDueBack: r.advanceDueBack,
+      advanceReceived: r.advanceReceived,
+      netRefundRealization: r.advanceReceived,
+      landlordRating: r.landlordRating,
+    };
   });
 
   const noticeDueBy = (ag) => {
@@ -442,109 +420,75 @@ async function getMISData() {
     return ag.agreement_notice_due_by_date || '—';
   };
 
-  const complianceRenewalRisk = agreements.map(a => {
-    const res = residenceById[a.agreement_residence_id];
-    const emp = employeeByAgreementId[a.agreement_id];
-    return {
-      agreementId: a.agreement_id,
-      residenceId: a.agreement_residence_id,
-      employee: emp ? getEmployeeName(emp) : '—',
-      renewalDueDate: a.agreement_renewal_due_date || '—',
-      noticePeriodRequirement: noticeDueBy(a),
-      statutoryStatus: a.agreement_statutory_status || '—',
-      documentLocation: a.agreement_document_location || '—',
-    };
-  });
+  const complianceRenewalRisk = agreements.filter(a => isActiveStatus(a.agreement_status)).map(a => ({
+    agreementId: a.agreement_id,
+    residenceId: a.agreement_residence_id,
+    employee: occupantLabel(a.agreement_id),
+    renewalDueDate: a.agreement_renewal_due_date || '—',
+    noticePeriodRequirement: noticeDueBy(a),
+    statutoryStatus: a.agreement_statutory_status || '—',
+    documentLocation: a.agreement_document_location || '—',
+  }));
 
-  const renewalsPastDue = [];
-  const renewalsDueSoon = [];
-  agreements.forEach(a => {
-    if (!isAgreementActive(a)) return;
-    const dueDate = a.agreement_renewal_due_date ? dayjs.tz(a.agreement_renewal_due_date, 'Asia/Kolkata').startOf('day') : null;
-    if (!dueDate || !dueDate.isValid()) return;
-    const res = residenceById[a.agreement_residence_id];
-    const emp = employeeByAgreementId[a.agreement_id];
-    const row = {
-      agreementId: a.agreement_id,
-      residenceId: a.agreement_residence_id,
-      employee: emp ? getEmployeeName(emp) : '—',
-      renewalDueDate: a.agreement_renewal_due_date,
-      monthlyRent: parseCurrency(a.agreement_monthly_rent_amount),
-    };
-    if (dueDate.isBefore(today, 'day')) {
-      row.daysPastDue = today.diff(dueDate, 'day');
-      renewalsPastDue.push(row);
-    } else if (dueDate.isSame(today, 'day') || dueDate.isBefore(ninetyDaysFromNow.add(1, 'day'), 'day')) {
-      row.daysUntilDue = dueDate.diff(today, 'day');
-      renewalsDueSoon.push(row);
-    }
-  });
-
-  const scheduledToVacate = agreements.filter(a =>
-    a.agreement_scheduled_to_vacate === true || a.agreement_scheduled_to_vacate === 'Yes' || a.agreement_scheduled_to_vacate === 'yes'
-  ).map(a => {
-    const res = residenceById[a.agreement_residence_id];
-    const emp = employeeByAgreementId[a.agreement_id];
-    const received = parseCurrency(a.agreement_advance_received || 0);
-    const dueBack = parseCurrency(a.agreement_advance_due_back || a.agreement_advance_amount || 0);
+  const scheduledToVacate = vacatingAgreements.map(a => {
+    const r = refundRow(a);
     return {
-      agreementId: a.agreement_id,
-      employee: emp ? getEmployeeName(emp) : '—',
-      residence: res ? res.residence_id : '—',
+      agreementId: r.agreementId,
+      employee: r.employee,
+      residence: r.residence,
       vacateDate: a.agreement_vacate_date,
-      advanceDueBack: dueBack,
-      advanceReceived: received,
-      status: received >= dueBack ? 'Processed' : 'Pending refund',
+      advanceDueBack: r.expectedRefund,
+      advanceReceived: r.advanceReceived,
+      status: r.status,
     };
   });
 
-  const refundStatus = agreements.filter(a => normalizeStatus(a.agreement_status || a.status) === 'inactive' || (a.agreement_scheduled_to_vacate === true || a.agreement_scheduled_to_vacate === 'Yes' || a.agreement_scheduled_to_vacate === 'yes')).map(a => {
-    const dueBack = parseCurrency(a.agreement_advance_due_back || a.agreement_advance_amount || 0);
-    const received = parseCurrency(a.agreement_advance_received || 0);
-    const maintenance = parseCurrency(a.agreement_maintenance_cut || 0);
-    const netReturned = received - maintenance;
-    const emp = employeeByAgreementId[a.agreement_id];
-    const res = residenceById[a.agreement_residence_id];
+  const refundStatus = refundCases.map(a => {
+    const r = refundRow(a);
     return {
-      agreementId: a.agreement_id,
-      employee: emp ? getEmployeeName(emp) : '—',
-      residence: res ? res.residence_id : '—',
-      advanceDueBack: dueBack,
-      advanceReceived: received,
-      maintenanceCut: maintenance,
-      netReturned,
-      status: received >= dueBack ? 'Processed' : 'Pending',
+      agreementId: r.agreementId,
+      employee: r.employee,
+      residence: r.residence,
+      advanceDueBack: r.advanceDueBack,
+      maintenanceCut: r.deductions,
+      expectedRefund: r.expectedRefund,
+      advanceReceived: r.advanceReceived,
+      netReturned: r.advanceReceived,
+      pending: r.pending,
+      status: r.status,
     };
   });
 
-  // --- Module 5: By Owner ---
+  // ── Module 5: By Owner ─────────────────────────────────────────────────────
   const byOwner = {};
   residences.forEach(r => {
     const owner = (r.residence_owner_name || 'Unassigned').trim();
-    if (!byOwner[owner]) byOwner[owner] = { propertyCount: 0, totalMonthlyRent: 0, totalAdvanceLocked: 0, activeAgreements: 0, landlordRating: r.residence_owner_rating || '—' };
-    byOwner[owner].propertyCount++;
-    const list = agreementsByResidenceId[r.residence_id] || [];
-    list.forEach(a => {
-      if (isAgreementActive(a)) {
-        byOwner[owner].totalMonthlyRent += parseCurrency(a.agreement_monthly_rent_amount);
-        byOwner[owner].totalAdvanceLocked += parseCurrency(a.agreement_advance_amount);
-        byOwner[owner].activeAgreements++;
-      }
-    });
+    const o = (byOwner[owner] ||= { propertyCount: 0, totalMonthlyRent: 0, totalAdvanceLocked: 0, activeAgreements: 0, refundOutstanding: 0, landlordRating: r.residence_owner_rating || '—' });
+    o.propertyCount++;
+  });
+  agreements.forEach(a => {
+    const res = residenceById[a.agreement_residence_id];
+    const owner = ((res && res.residence_owner_name) || 'Unassigned').trim();
+    const o = (byOwner[owner] ||= { propertyCount: 0, totalMonthlyRent: 0, totalAdvanceLocked: 0, activeAgreements: 0, refundOutstanding: 0, landlordRating: '—' });
+    if (isActiveStatus(a.agreement_status)) {
+      o.totalMonthlyRent += num(a.agreement_monthly_rent_amount);
+      o.totalAdvanceLocked += num(a.agreement_advance_amount);
+      o.activeAgreements++;
+    }
+    o.refundOutstanding += refunds[a.agreement_id].outstanding;
   });
   const byOwnerLandlord = Object.keys(byOwner).sort().map(owner => ({
     ownerName: owner,
-    propertyCount: byOwner[owner].propertyCount,
-    totalMonthlyRent: byOwner[owner].totalMonthlyRent,
-    totalAdvanceLocked: byOwner[owner].totalAdvanceLocked,
-    activeAgreements: byOwner[owner].activeAgreements,
-    landlordRating: byOwner[owner].landlordRating,
+    ...byOwner[owner],
     status: byOwner[owner].activeAgreements > 0 ? 'Active' : '—',
   }));
 
   return {
     reportDate: today.format('DD-MM-YYYY'),
     ownerSummary,
+    residenceOccupancy,
+    roomVacancy,
+    unitSummary: units,
     upcomingVacancyReplacementTracker,
     propertiesBecomingAvailable,
     replacementPlanningSummary,
@@ -564,17 +508,42 @@ async function getMISData() {
     refundStatus,
     byOwnerLandlord,
     summary: {
-      totalProperties,
-      activeEmployees, inactiveEmployees,
-      totalMonthlyRent, totalAdvanceLocked, totalAdvanceDueBack, totalNetReceived,
+      totalProperties: residences.length,
+      activeEmployees: t.activeEmployees,
+      inactiveEmployees: t.inactiveEmployees,
+      totalMonthlyRent: t.monthlyRent,
+      totalAdvanceLocked: t.advanceLocked,
+      totalAdvanceDueBack: t.refundExpected,
+      totalNetReceived: t.refundReceived,
+      totalAdvancePending: t.refundOutstanding,
+      totalRefundDeductions: t.refundDeductions,
+      totalRefundUpcoming: t.refundUpcoming,
+      refundCasesOpen: t.refundCasesOpen,
       totalScheduledToVacate, pastDue, dueSoon,
-      // Enhanced KPIs:
-      activeResidences, inactiveResidences,
-      occupiedResidences: occupiedCount, vacantResidences,
-      totalRooms, occupiedRooms, vacantRooms, roomOccupancyPct, utilizationPct,
-      allocatedEmployees, unallocatedEmployees,
+      activeResidences: t.activeResidences,
+      inactiveResidences: t.inactiveResidences,
+      occupiedResidences: t.occupiedResidences,
+      vacantResidences: t.vacantResidences,
+      residencesWithStructure: t.residencesWithStructure,
+      residencesWithoutStructure: t.residencesWithoutStructure,
+      utilizationPct,
+      totalRooms: t.totalRooms,
+      fullRooms: t.fullRooms,
+      partialRooms: t.partialRooms,
+      vacantRooms: t.vacantRooms,
+      roomsWithVacancy: t.roomsWithVacancy,
+      occupiedRooms: t.fullRooms + t.partialRooms,
+      totalBeds: t.bedCapacity,
+      occupiedBeds: t.occupiedBeds,
+      vacantBeds: t.vacantBeds,
+      bedsHeldByInactive: t.bedsHeldByInactive,
+      bedOccupancyPct: t.occupancyPct,
+      roomOccupancyPct: t.occupancyPct,
+      allocatedEmployees: activeAllocated,
+      employeesWithRoom: t.employeesWithRoom,
+      employeesResidenceOnly: t.employeesResidenceOnly,
+      unallocatedEmployees: t.employeesUnallocated,
       leavingIn30Days, leavingIn60Days, leavingIn90Days,
-      totalAdvancePending,
     },
   };
 }

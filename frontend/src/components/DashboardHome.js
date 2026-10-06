@@ -8,7 +8,7 @@ import {
   HomeOutlined, TeamOutlined, DollarOutlined, CalendarOutlined,
   WarningOutlined, UserOutlined, BankOutlined, FileTextOutlined,
   DashboardOutlined, SafetyCertificateOutlined, ApartmentOutlined,
-  AppstoreOutlined, ShopOutlined, ArrowRightOutlined,
+  AppstoreOutlined, ShopOutlined, InfoCircleOutlined,
 } from '@ant-design/icons';
 import { Column, Pie } from '@ant-design/charts';
 import { useNavigate } from 'react-router-dom';
@@ -137,7 +137,6 @@ const DashboardHome = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [misData, setMisData] = useState(null);
-  const [analyticsData, setAnalyticsData] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [availModal, setAvailModal] = useState({ open: false, type: null, title: '' });
   const [availDetail, setAvailDetail] = useState([]);
@@ -146,12 +145,8 @@ const DashboardHome = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [misRes, analyticsRes] = await Promise.all([
-        api.get('/analytics/mis'),
-        api.get('/analytics'),
-      ]);
+      const misRes = await api.get('/analytics/mis');
       setMisData(misRes.data || {});
-      setAnalyticsData(analyticsRes.data || {});
     } catch {
       message.error('Failed to load dashboard data');
     } finally {
@@ -161,8 +156,8 @@ const DashboardHome = () => {
 
   const openAvailModal = useCallback(async (type) => {
     const titles = {
-      properties: 'Vacant Properties',
-      rooms:      'Vacant Rooms — Detail',
+      properties: 'Residences — Vacancy',
+      rooms:      'Rooms with Vacant Beds',
       beds:       'Available Beds — Detail',
     };
     setAvailModal({ open: true, type, title: titles[type] || '' });
@@ -200,8 +195,55 @@ const DashboardHome = () => {
               Total: r.totalEmployees,
               Active: r.active,
               Inactive: r.inactive,
-              Allocated: r.allocated,
-              Unallocated: r.unallocated,
+              'Room Allocated': r.withRoom,
+              'Residence, No Room': r.residenceOnly,
+              'Not Allocated': r.unallocated,
+            })),
+          },
+          {
+            sheetName: 'Residence Occupancy',
+            data: (misData?.residenceOccupancy || []).map(r => ({
+              'Residence ID': r.residenceId,
+              Residence: r.residence,
+              Unit: r.unit,
+              Floors: r.floors,
+              Rooms: r.rooms,
+              Capacity: r.capacity,
+              Occupied: r.occupied,
+              Vacant: r.vacant,
+              'Occupancy %': r.occupancyPct,
+              'No Room Assigned': r.residentsWithoutRoom,
+              Setup: r.setupStatus,
+            })),
+          },
+          {
+            sheetName: 'Room Vacancy',
+            data: (misData?.roomVacancy || []).map(r => ({
+              Residence: r.residence,
+              Unit: r.unit,
+              Floor: r.floor,
+              Room: r.room,
+              Type: r.roomType,
+              Capacity: r.capacity,
+              Occupied: r.occupied,
+              Vacant: r.vacant,
+              Status: r.status,
+              Occupants: r.occupants,
+            })),
+          },
+          {
+            sheetName: 'Unit Summary',
+            data: (misData?.unitSummary || []).map(u => ({
+              Unit: u.unit,
+              Residences: u.residences,
+              Rooms: u.rooms,
+              'Bed Capacity': u.capacity,
+              Occupied: u.occupied,
+              Vacant: u.vacant,
+              'Occupancy %': u.occupancyPct,
+              Employees: u.employees,
+              'Room Allocated': u.employeesWithRoom,
+              'Monthly Rent': u.rent,
             })),
           },
           {
@@ -247,15 +289,17 @@ const DashboardHome = () => {
             })),
           },
           {
-            sheetName: 'Advance Pipeline',
+            sheetName: 'Advance Refunds',
             data: (misData?.advancePipeline || []).map(r => ({
               'Agreement ID': r.agreementId,
               Residence: r.residence,
-              Employee: r.employee,
-              'Advance Locked': r.advanceLocked,
+              Landlord: r.residenceLandlord,
+              'Vacate Date': r.vacateDate || '',
               'Due Back': r.advanceDueBack,
+              Deductions: r.deductions,
+              'Expected Refund': r.expectedRefund,
               Received: r.advanceReceived,
-              Pending: r.pending,
+              Outstanding: r.pending,
               Status: r.status,
             })),
           },
@@ -333,26 +377,36 @@ const DashboardHome = () => {
 
   const s = misData.summary || {};
 
-  // ── KPI values ─────────────────────────────────────────────────────────
+  // ── KPI values (all calculated on the server — see accommodationSnapshot.js) ──
   const totalProperties    = s.totalProperties    || 0;
   const activeResidences   = s.activeResidences   || 0;
   const inactiveResidences = s.inactiveResidences || 0;
   const occupiedResidences = s.occupiedResidences || 0;
-  const vacantResidences   = s.vacantResidences   != null ? s.vacantResidences : Math.max(0, activeResidences - occupiedResidences);
+  const vacantResidences   = s.vacantResidences   || 0;
+  const residencesWithoutStructure = s.residencesWithoutStructure || 0;
   const totalRooms         = s.totalRooms         || 0;
-  const occupiedRooms      = s.occupiedRooms      || 0;
-  const vacantRooms        = s.vacantRooms        != null ? s.vacantRooms : Math.max(0, totalRooms - occupiedRooms);
-  const roomOccupancyPct   = s.roomOccupancyPct   != null ? s.roomOccupancyPct : (totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0);
-  const utilizationPct     = s.utilizationPct     || 0;
+  const fullRooms          = s.fullRooms          || 0;
+  const partialRooms       = s.partialRooms       || 0;
+  const vacantRooms        = s.vacantRooms        || 0;
+  const roomsWithVacancy   = s.roomsWithVacancy   || 0;
+  const totalBeds          = s.totalBeds          || 0;
+  const occupiedBeds       = s.occupiedBeds       || 0;
+  const availableBeds      = s.vacantBeds         || 0;
+  const bedsHeldByInactive = s.bedsHeldByInactive || 0;
+  const bedOccupancyPct    = s.bedOccupancyPct    || 0;
   const activeEmployees    = s.activeEmployees    || 0;
   const inactiveEmployees  = s.inactiveEmployees  || 0;
   const totalEmployees     = activeEmployees + inactiveEmployees;
-  const allocatedEmployees = s.allocatedEmployees || 0;
-  const unallocatedEmployees = s.unallocatedEmployees != null ? s.unallocatedEmployees : Math.max(0, activeEmployees - allocatedEmployees);
+  const employeesWithRoom  = s.employeesWithRoom  || 0;
+  const employeesResidenceOnly = s.employeesResidenceOnly || 0;
+  const unallocatedEmployees = s.unallocatedEmployees || 0;
   const totalMonthlyRent   = s.totalMonthlyRent   || 0;
   const totalAdvanceLocked = s.totalAdvanceLocked || 0;
   const totalAdvancePending= s.totalAdvancePending|| 0;
   const totalNetReceived   = s.totalNetReceived   || 0;
+  const totalRefundDeductions = s.totalRefundDeductions || 0;
+  const totalRefundUpcoming = s.totalRefundUpcoming || 0;
+  const refundCasesOpen    = s.refundCasesOpen    || 0;
   const totalScheduledToVacate = s.totalScheduledToVacate || 0;
   const pastDue            = s.pastDue            || 0;
   const dueSoon            = s.dueSoon            || 0;
@@ -360,26 +414,19 @@ const DashboardHome = () => {
   const leavingIn60Days    = s.leavingIn60Days    || 0;
   const leavingIn90Days    = s.leavingIn90Days    || 0;
 
-  // ── Bed stats from /analytics API ────────────────────────────────────────
-  const totalBeds     = analyticsData?.totalBeds     || 0;
-  const occupiedBeds  = analyticsData?.occupiedBeds  || 0;
-  const availableBeds = analyticsData?.availableBeds || 0;
-  const bedOccupancyPct = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
-
-  // ── Unit breakdown from /analytics API ────────────────────────────────────
-  const unitBreakdown = analyticsData?.unitBreakdown || [];
+  const unitBreakdown = misData.unitSummary || [];
 
   // ── Chart data ─────────────────────────────────────────────────────────
   const propertyPieData = [
-    { type: 'Occupied', value: occupiedResidences },
-    { type: 'Vacant (Active)', value: vacantResidences },
-    ...(inactiveResidences > 0 ? [{ type: 'Inactive', value: inactiveResidences }] : []),
+    { type: 'Full', value: fullRooms },
+    { type: 'Partially occupied', value: partialRooms },
+    { type: 'Vacant', value: vacantRooms },
   ].filter(d => d.value > 0);
 
   const employeePieData = [
-    { type: 'Allocated', value: allocatedEmployees },
-    { type: 'Unallocated', value: unallocatedEmployees },
-    ...(inactiveEmployees > 0 ? [{ type: 'Inactive', value: inactiveEmployees }] : []),
+    { type: 'Room allocated', value: employeesWithRoom },
+    { type: 'Residence, no room', value: employeesResidenceOnly },
+    { type: 'Not allocated', value: unallocatedEmployees },
   ].filter(d => d.value > 0);
 
   const abbrev = (s, n = 16) => s && s.length > n ? s.substring(0, n) + '…' : (s || '');
@@ -398,6 +445,7 @@ const DashboardHome = () => {
   const advanceData = [
     { stage: 'Locked (Active)', amount: totalAdvanceLocked },
     { stage: 'Received Back',   amount: totalNetReceived },
+    { stage: 'Deductions',      amount: totalRefundDeductions },
     { stage: 'Pending Refund',  amount: totalAdvancePending },
   ].filter(d => d.amount > 0);
 
@@ -418,7 +466,8 @@ const DashboardHome = () => {
     ...pieBase,
     data: propertyPieData,
     angleField: 'value', colorField: 'type',
-    color: ['#E87103', '#52c41a', '#bfbfbf'],
+    color: ['#f5222d', '#faad14', '#52c41a'],
+    scale: { color: { domain: ['Full', 'Partially occupied', 'Vacant'], range: ['#f5222d', '#faad14', '#52c41a'] } },
     tooltip: { formatter: (d) => {
       const t = propertyPieData.reduce((s, x) => s + x.value, 0);
       return { name: d.type, value: `${d.value} (${t > 0 ? ((d.value/t)*100).toFixed(1) : 0}%)` };
@@ -429,7 +478,8 @@ const DashboardHome = () => {
     ...pieBase,
     data: employeePieData,
     angleField: 'value', colorField: 'type',
-    color: ['#1890ff', '#faad14', '#d9d9d9'],
+    color: ['#1890ff', '#faad14', '#f5222d'],
+    scale: { color: { domain: ['Room allocated', 'Residence, no room', 'Not allocated'], range: ['#1890ff', '#faad14', '#f5222d'] } },
     tooltip: { formatter: (d) => {
       const t = employeePieData.reduce((s, x) => s + x.value, 0);
       return { name: d.type, value: `${d.value} (${t > 0 ? ((d.value/t)*100).toFixed(1) : 0}%)` };
@@ -492,7 +542,7 @@ const DashboardHome = () => {
 
   const advanceConfig = {
     data: advanceData, xField: 'stage', yField: 'amount',
-    color: ({ stage }) => stage === 'Locked (Active)' ? '#E87103' : stage === 'Received Back' ? '#52c41a' : '#f5222d',
+    color: ({ stage }) => ({ 'Locked (Active)': '#E87103', 'Received Back': '#52c41a', Deductions: '#faad14' }[stage] || '#f5222d'),
     columnWidthRatio: 0.55,
     label: {
       position: 'top',
@@ -526,9 +576,9 @@ const DashboardHome = () => {
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} md={12}>
           <Card
-            title="Property Utilization"
+            title="Room Occupancy Status"
             size="small"
-            extra={<Text type="secondary" style={{ fontSize: 12 }}>{occupiedResidences} occupied · {totalProperties} total</Text>}
+            extra={<Text type="secondary" style={{ fontSize: 12 }}>{totalRooms} rooms · {occupiedBeds}/{totalBeds} beds occupied</Text>}
           >
             {propertyPieData.length > 0
               ? <Pie {...propPieConfig} height={270} />
@@ -539,7 +589,7 @@ const DashboardHome = () => {
           <Card
             title="Workforce Allocation"
             size="small"
-            extra={<Text type="secondary" style={{ fontSize: 12 }}>{allocatedEmployees} allocated · {activeEmployees} active</Text>}
+            extra={<Text type="secondary" style={{ fontSize: 12 }}>{employeesWithRoom} with room · {activeEmployees} active</Text>}
           >
             {employeePieData.length > 0
               ? <Pie {...empPieConfig} height={270} />
@@ -568,8 +618,10 @@ const DashboardHome = () => {
         // Only these metrics carry a ₹ (rupee) value — all others are counts, percentages or dates
         const CURRENCY_METRICS = new Set([
           'Total Monthly Burn (Rent)',
-          'Advances at Risk (Due Back)',
-          'Advance Pending Refund',
+          'Advance Locked (Active Agreements)',
+          'Advance Refund Outstanding',
+          'Advance Refund Received',
+          'Advance Refunds Upcoming (Vacating)',
         ]);
         const fmtSummaryValue = (v, metric) => {
           if (typeof v !== 'number') return v;           // string / percentage / date — return as-is
@@ -608,6 +660,64 @@ const DashboardHome = () => {
     </div>
   );
 
+  // ── Occupancy & Vacancy Tab (room level) ─────────────────────────────────
+  const ROOM_STATUS_COLOR = { Full: 'red', 'Partially occupied': 'gold', Vacant: 'green', 'No beds': 'default' };
+  const OccupancyContent = () => (
+    <div>
+      <TCard
+        title="Residence Occupancy"
+        icon={<HomeOutlined />}
+        dataSource={misData.residenceOccupancy || []}
+        rowKey="residenceId"
+        exportName="Residence_Occupancy"
+        columns={[
+          { title: 'Residence', dataIndex: 'residence', key: 'residence',
+            render: (v, r) => <Typography.Link onClick={() => navigate(`/residences?view=${r.residenceId}`)}>{v}</Typography.Link>,
+            sorter: (a, b) => a.residence.localeCompare(b.residence) },
+          { title: 'Unit', dataIndex: 'unit', key: 'unit' },
+          { title: 'Floors', dataIndex: 'floors', key: 'floors' },
+          { title: 'Rooms', dataIndex: 'rooms', key: 'rooms' },
+          { title: 'Capacity', dataIndex: 'capacity', key: 'capacity', sorter: (a, b) => a.capacity - b.capacity },
+          { title: 'Occupied', dataIndex: 'occupied', key: 'occupied' },
+          { title: 'Vacant', dataIndex: 'vacant', key: 'vacant', sorter: (a, b) => a.vacant - b.vacant,
+            render: v => <Text strong style={{ color: v > 0 ? '#52c41a' : '#8c8c8c' }}>{v}</Text> },
+          { title: 'Occupancy %', dataIndex: 'occupancyPct', key: 'occupancyPct', sorter: (a, b) => a.occupancyPct - b.occupancyPct,
+            render: (v, r) => r.setupStatus === 'Configured' ? <Tag color={v >= 90 ? 'success' : v >= 60 ? 'warning' : 'error'}>{v}%</Tag> : '—' },
+          { title: 'Full / Partial / Vacant rooms', key: 'roomsplit', render: (_, r) => `${r.fullRooms} / ${r.partialRooms} / ${r.vacantRooms}` },
+          { title: 'No room assigned', dataIndex: 'residentsWithoutRoom', key: 'residentsWithoutRoom',
+            render: v => v > 0 ? <Tag color="warning">{v}</Tag> : '—' },
+          { title: 'Setup', dataIndex: 'setupStatus', key: 'setupStatus',
+            render: v => <Tag color={v === 'Configured' ? 'success' : 'warning'}>{v}</Tag> },
+        ]}
+      />
+      <TCard
+        title="Room-Level Vacancy"
+        icon={<AppstoreOutlined />}
+        dataSource={misData.roomVacancy || []}
+        rowKey="roomId"
+        exportName="Room_Vacancy"
+        columns={[
+          { title: 'Residence', dataIndex: 'residence', key: 'residence', sorter: (a, b) => a.residence.localeCompare(b.residence) },
+          { title: 'Unit', dataIndex: 'unit', key: 'unit',
+            filters: [...new Set((misData.roomVacancy || []).map(r => r.unit))].map(u => ({ text: u, value: u })),
+            onFilter: (v, r) => r.unit === v },
+          { title: 'Floor', dataIndex: 'floor', key: 'floor' },
+          { title: 'Room', dataIndex: 'room', key: 'room' },
+          { title: 'Type', dataIndex: 'roomType', key: 'roomType' },
+          { title: 'Capacity', dataIndex: 'capacity', key: 'capacity' },
+          { title: 'Occupied', dataIndex: 'occupied', key: 'occupied' },
+          { title: 'Vacant', dataIndex: 'vacant', key: 'vacant', defaultSortOrder: 'descend', sorter: (a, b) => a.vacant - b.vacant,
+            render: v => <Text strong style={{ color: v > 0 ? '#52c41a' : '#8c8c8c' }}>{v}</Text> },
+          { title: 'Status', dataIndex: 'status', key: 'status',
+            filters: ['Full', 'Partially occupied', 'Vacant'].map(v => ({ text: v, value: v })),
+            onFilter: (v, r) => r.status === v,
+            render: v => <Tag color={ROOM_STATUS_COLOR[v]}>{v}</Tag> },
+          { title: 'Occupants', dataIndex: 'occupants', key: 'occupants', ellipsis: true },
+        ]}
+      />
+    </div>
+  );
+
   // ── Workforce Tab ─────────────────────────────────────────────────────────
   const WorkforceContent = () => (
     <div>
@@ -622,13 +732,14 @@ const DashboardHome = () => {
           { title: 'Total', dataIndex: 'totalEmployees', key: 'totalEmployees', sorter: (a, b) => a.totalEmployees - b.totalEmployees, defaultSortOrder: 'descend' },
           { title: 'Active', dataIndex: 'active', key: 'active', render: v => <Tag color="success">{v}</Tag> },
           { title: 'Inactive', dataIndex: 'inactive', key: 'inactive', render: v => v > 0 ? <Tag color="default">{v}</Tag> : <Tag color="success">0</Tag> },
-          { title: 'Allocated', dataIndex: 'allocated', key: 'allocated', render: v => <Tag color="blue">{v}</Tag> },
-          { title: 'Unallocated', dataIndex: 'unallocated', key: 'unallocated', render: v => v > 0 ? <Tag color="warning">{v}</Tag> : <Tag color="success">0</Tag> },
+          { title: 'Room Allocated', dataIndex: 'withRoom', key: 'withRoom', render: v => <Tag color="blue">{v}</Tag> },
+          { title: 'Residence, No Room', dataIndex: 'residenceOnly', key: 'residenceOnly', render: v => v > 0 ? <Tag color="warning">{v}</Tag> : '0' },
+          { title: 'Not Allocated', dataIndex: 'unallocated', key: 'unallocated', render: v => v > 0 ? <Tag color="error">{v}</Tag> : <Tag color="success">0</Tag> },
           {
-            title: 'Allocation %',
+            title: 'Room Allocation %',
             key: 'allocPct',
             render: (_, r) => {
-              const pct = r.active > 0 ? Math.round((r.allocated / r.active) * 100) : 0;
+              const pct = r.active > 0 ? Math.round((r.withRoom / r.active) * 100) : 0;
               return <Tag color={pct >= 90 ? 'success' : pct >= 60 ? 'warning' : 'error'}>{pct}%</Tag>;
             },
           },
@@ -663,7 +774,10 @@ const DashboardHome = () => {
           { title: 'Department', dataIndex: 'department', key: 'department', sorter: (a, b) => (a.department || '').localeCompare(b.department || '') },
           { title: 'Designation', dataIndex: 'designation', key: 'designation', ellipsis: true },
           { title: 'Status', dataIndex: 'status', key: 'status', render: v => <STag v={v} /> },
+          { title: 'Allocation', dataIndex: 'allocationStatus', key: 'allocationStatus',
+            render: v => v === '—' ? <Text type="secondary">—</Text> : <Tag color={v === 'Room allocated' ? 'blue' : v === 'Room not assigned' ? 'warning' : 'error'}>{v}</Tag> },
           { title: 'Residence', dataIndex: 'allocatedResidenceId', key: 'allocatedResidenceId', render: v => v === '—' ? <Text type="secondary">—</Text> : v },
+          { title: 'Room', dataIndex: 'room', key: 'room' },
           { title: 'Renewal Due', dataIndex: 'renewalDue', key: 'renewalDue', render: fmtD },
           { title: 'Last Working Date', dataIndex: 'lastWorkingDate', key: 'lastWorkingDate', render: fmtD },
         ]}
@@ -718,10 +832,13 @@ const DashboardHome = () => {
           { title: 'Residence', dataIndex: 'residenceId', key: 'residenceId' },
           { title: 'Owner', dataIndex: 'ownerName', key: 'ownerName', sorter: (a, b) => (a.ownerName || '').localeCompare(b.ownerName || '') },
           { title: 'Address', dataIndex: 'address', key: 'address', ellipsis: true },
-          { title: 'Employee', dataIndex: 'employee', key: 'employee' },
+          { title: 'Unit', dataIndex: 'unit', key: 'unit' },
+          { title: 'Occupants', dataIndex: 'occupants', key: 'occupants' },
+          { title: 'Capacity', dataIndex: 'capacity', key: 'capacity' },
           { title: 'Monthly Rent', dataIndex: 'monthlyRent', key: 'monthlyRent', render: fmtC, sorter: (a, b) => a.monthlyRent - b.monthlyRent, defaultSortOrder: 'descend' },
           { title: 'Advance Locked', dataIndex: 'advanceLocked', key: 'advanceLocked', render: fmtC },
-          { title: 'Cost / Head', dataIndex: 'costPerHead', key: 'costPerHead', render: v => typeof v === 'number' ? fmtC(v) : v },
+          { title: 'Cost / Occupant', dataIndex: 'costPerHead', key: 'costPerHead', render: v => typeof v === 'number' ? fmtC(v) : v },
+          { title: 'Cost / Bed', dataIndex: 'costPerBed', key: 'costPerBed', render: v => typeof v === 'number' ? fmtC(v) : v },
         ]}
       />
 
@@ -737,6 +854,7 @@ const DashboardHome = () => {
           { title: 'Active Agreements', dataIndex: 'activeAgreements', key: 'activeAgreements', sorter: (a, b) => a.activeAgreements - b.activeAgreements, defaultSortOrder: 'descend' },
           { title: 'Monthly Rent', dataIndex: 'totalMonthlyRent', key: 'totalMonthlyRent', render: fmtC, sorter: (a, b) => a.totalMonthlyRent - b.totalMonthlyRent },
           { title: 'Advance Locked', dataIndex: 'totalAdvanceLocked', key: 'totalAdvanceLocked', render: fmtC },
+          { title: 'Refund Outstanding', dataIndex: 'refundOutstanding', key: 'refundOutstanding', render: v => v > 0 ? <Text style={{ color: '#f5222d' }}>{fmtC(v)}</Text> : fmtC(v) },
           { title: 'Rating', dataIndex: 'landlordRating', key: 'landlordRating', render: v => v && v !== '—' ? <Tag color="gold">{v}</Tag> : <Text type="secondary">—</Text> },
           { title: 'Status', dataIndex: 'status', key: 'status', render: v => <STag v={v} /> },
         ]}
@@ -924,12 +1042,13 @@ const DashboardHome = () => {
     <div>
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         {[
-          { label: 'Total Advance Locked', value: fmtC(totalAdvanceLocked), color: '#E87103', sub: 'Active agreements' },
-          { label: 'Total Received Back', value: fmtC(totalNetReceived), color: '#52c41a', sub: 'Refunds collected' },
-          { label: 'Pending Refund', value: fmtC(totalAdvancePending), color: totalAdvancePending > 0 ? '#f5222d' : '#52c41a', sub: totalAdvancePending > 0 ? 'Follow up required' : 'None pending' },
+          { label: 'Advance Locked', value: fmtC(totalAdvanceLocked), color: '#E87103', sub: 'Active agreements (incl. vacating)' },
+          { label: 'Refund Outstanding', value: fmtC(totalAdvancePending), color: totalAdvancePending > 0 ? '#f5222d' : '#52c41a', sub: `${refundCasesOpen} vacated agreements open` },
+          { label: 'Received Back', value: fmtC(totalNetReceived), color: '#52c41a', sub: 'Recorded receipts' },
+          { label: 'Landlord Deductions', value: fmtC(totalRefundDeductions), color: '#faad14', sub: `Upcoming: ${fmtC(totalRefundUpcoming)}` },
         ].map(({ label, value, color, sub }) => (
-          <Col xs={24} md={8} key={label}>
-            <Card size="small" style={{ borderTop: `3px solid ${color}` }}>
+          <Col xs={12} md={6} key={label}>
+            <Card size="small" style={{ borderTop: `3px solid ${color}`, cursor: 'pointer' }} hoverable onClick={() => navigate('/refunds')}>
               <div style={{ fontSize: 20, fontWeight: 700, color }}>{value}</div>
               <div style={{ fontSize: 12, color: '#595959', fontWeight: 600 }}>{label}</div>
               <div style={{ fontSize: 11, color: '#8c8c8c' }}>{sub}</div>
@@ -939,56 +1058,22 @@ const DashboardHome = () => {
       </Row>
 
       <TCard
-        title="Advance Pipeline — All Agreements"
+        title="Refund Pipeline — Vacated & Vacating Agreements"
         icon={<BankOutlined />}
         dataSource={misData.advancePipeline || []}
         rowKey="agreementId"
-        exportName="Advance_Pipeline"
+        exportName="Advance_Refund_Pipeline"
+        extraContent={<div style={{ marginBottom: 8 }}><Button size="small" type="link" onClick={() => navigate('/refunds')}>Manage refunds →</Button></div>}
         columns={[
           { title: 'Agreement', dataIndex: 'agreementId', key: 'agreementId' },
           { title: 'Residence', dataIndex: 'residence', key: 'residence' },
-          { title: 'Employee', dataIndex: 'employee', key: 'employee' },
-          { title: 'Advance Locked', dataIndex: 'advanceLocked', key: 'advanceLocked', render: fmtC, sorter: (a, b) => a.advanceLocked - b.advanceLocked },
-          { title: 'Due Back', dataIndex: 'advanceDueBack', key: 'advanceDueBack', render: fmtC },
-          { title: 'Received', dataIndex: 'advanceReceived', key: 'advanceReceived', render: fmtC },
-          { title: 'Pending', dataIndex: 'pending', key: 'pending', render: v => v > 0 ? <Text style={{ color: '#f5222d', fontWeight: 600 }}>{fmtC(v)}</Text> : <Text style={{ color: '#52c41a' }}>₹0</Text>, sorter: (a, b) => b.pending - a.pending },
-          { title: 'Status', dataIndex: 'status', key: 'status', render: v => <STag v={v} /> },
-        ]}
-      />
-
-      <TCard
-        title="Advance & Refund Liquidity"
-        icon={<DollarOutlined />}
-        dataSource={misData.advanceRefundLiquidity || []}
-        rowKey="agreementId"
-        exportName="Advance_Refund_Liquidity"
-        columns={[
-          { title: 'Agreement', dataIndex: 'agreementId', key: 'agreementId' },
-          { title: 'Employee', dataIndex: 'employee', key: 'employee' },
           { title: 'Landlord', dataIndex: 'residenceLandlord', key: 'residenceLandlord' },
-          { title: 'Total Locked', dataIndex: 'totalAdvanceLocked', key: 'totalAdvanceLocked', render: fmtC },
-          { title: 'Pipeline (30d)', dataIndex: 'refundsInPipeline30', key: 'refundsInPipeline30', render: fmtC },
+          { title: 'Vacated', dataIndex: 'vacateDate', key: 'vacateDate', render: fmtD },
           { title: 'Due Back', dataIndex: 'advanceDueBack', key: 'advanceDueBack', render: fmtC },
+          { title: 'Deductions', dataIndex: 'deductions', key: 'deductions', render: fmtC },
+          { title: 'Expected', dataIndex: 'expectedRefund', key: 'expectedRefund', render: fmtC },
           { title: 'Received', dataIndex: 'advanceReceived', key: 'advanceReceived', render: fmtC },
-          { title: 'Net Realization', dataIndex: 'netRefundRealization', key: 'netRefundRealization', render: fmtC },
-          { title: 'Landlord Rating', dataIndex: 'landlordRating', key: 'landlordRating' },
-        ]}
-      />
-
-      <TCard
-        title="Refund Status — Closed vs Pending"
-        icon={<FileTextOutlined />}
-        dataSource={misData.refundStatus || []}
-        rowKey="agreementId"
-        exportName="Refund_Status"
-        columns={[
-          { title: 'Agreement', dataIndex: 'agreementId', key: 'agreementId' },
-          { title: 'Employee', dataIndex: 'employee', key: 'employee' },
-          { title: 'Residence', dataIndex: 'residence', key: 'residence' },
-          { title: 'Due Back', dataIndex: 'advanceDueBack', key: 'advanceDueBack', render: fmtC },
-          { title: 'Received', dataIndex: 'advanceReceived', key: 'advanceReceived', render: fmtC },
-          { title: 'Maintenance Cut', dataIndex: 'maintenanceCut', key: 'maintenanceCut', render: fmtC },
-          { title: 'Net Returned', dataIndex: 'netReturned', key: 'netReturned', render: fmtC },
+          { title: 'Outstanding', dataIndex: 'pending', key: 'pending', render: v => v > 0 ? <Text style={{ color: '#f5222d', fontWeight: 600 }}>{fmtC(v)}</Text> : <Text style={{ color: '#52c41a' }}>₹0</Text>, sorter: (a, b) => b.pending - a.pending },
           { title: 'Status', dataIndex: 'status', key: 'status', render: v => <STag v={v} /> },
         ]}
       />
@@ -1007,16 +1092,18 @@ const DashboardHome = () => {
         columns={[
           { title: 'Residence ID', dataIndex: 'residenceId', key: 'residenceId' },
           { title: 'Address', dataIndex: 'address', key: 'address', ellipsis: true },
-          { title: 'Capacity (Rooms)', dataIndex: 'capacity', key: 'capacity', sorter: (a, b) => a.capacity - b.capacity },
-          { title: 'Currently Occupied', dataIndex: 'occupancy', key: 'occupancy', sorter: (a, b) => a.occupancy - b.occupancy },
+          { title: 'Capacity (Beds)', dataIndex: 'capacity', key: 'capacity', sorter: (a, b) => a.capacity - b.capacity },
+          { title: 'Occupied', dataIndex: 'occupancy', key: 'occupancy', sorter: (a, b) => a.occupancy - b.occupancy },
+          { title: 'Vacant', dataIndex: 'vacant', key: 'vacant', sorter: (a, b) => a.vacant - b.vacant },
           {
             title: 'Occupancy %',
+            dataIndex: 'occupancyPct',
             key: 'pct',
-            render: (_, r) => {
-              const pct = r.capacity > 0 ? Math.round((r.occupancy / r.capacity) * 100) : 0;
-              return <Tag color={pct === 100 ? 'success' : pct >= 50 ? 'warning' : 'error'}>{pct}%</Tag>;
-            },
+            render: (v, r) => r.capacity > 0 ? <Tag color={v >= 100 ? 'success' : v >= 50 ? 'warning' : 'error'}>{v}%</Tag> : '—',
           },
+          { title: 'Monthly Rent', dataIndex: 'monthlyRent', key: 'monthlyRent', render: fmtC },
+          { title: 'Cost of Vacant Beds / Month', dataIndex: 'vacancyCost', key: 'vacancyCost', render: v => v > 0 ? <Text style={{ color: '#f5222d' }}>{fmtC(v)}</Text> : '—',
+            sorter: (a, b) => a.vacancyCost - b.vacancyCost },
           { title: 'Suggestion', dataIndex: 'optimizationSuggestion', key: 'optimizationSuggestion', ellipsis: true },
         ]}
       />
@@ -1026,11 +1113,18 @@ const DashboardHome = () => {
   // ── Unit-Wise Content ──────────────────────────────────────────────────────
   const UnitContent = () => {
     const unitCols = [
-      { title: 'Business Unit', dataIndex: 'unit', key: 'unit' },
+      { title: 'Unit', dataIndex: 'unit', key: 'unit' },
+      { title: 'Residences', dataIndex: 'residences', key: 'residences' },
+      { title: 'Rooms', dataIndex: 'rooms', key: 'rooms' },
+      { title: 'Bed Capacity', dataIndex: 'capacity', key: 'capacity' },
+      { title: 'Occupied', dataIndex: 'occupied', key: 'occupied' },
+      { title: 'Vacant', dataIndex: 'vacant', key: 'vacant', render: v => <Text strong style={{ color: v > 0 ? '#52c41a' : '#8c8c8c' }}>{v}</Text> },
+      { title: 'Occupancy %', dataIndex: 'occupancyPct', key: 'occupancyPct', render: (v, r) => r.capacity > 0 ? `${v}%` : '—' },
       { title: 'Employees', dataIndex: 'employees', key: 'employees', sorter: (a,b) => a.employees - b.employees },
+      { title: 'Room Allocated', dataIndex: 'employeesWithRoom', key: 'employeesWithRoom' },
       { title: 'Active Agreements', dataIndex: 'agreements', key: 'agreements' },
       { title: 'Monthly Rent', dataIndex: 'rent', key: 'rent', render: (v) => fmtCFull(v), sorter: (a,b) => a.rent - b.rent },
-      { title: 'Cost per Employee', key: 'cpe', render: (_, r) => r.employees > 0 ? fmtCFull(r.rent / r.employees) : '—', sorter: (a,b) => (a.rent/Math.max(a.employees,1)) - (b.rent/Math.max(b.employees,1)) },
+      { title: 'Cost per Employee', dataIndex: 'costPerEmployee', key: 'cpe', render: (v, r) => r.employees > 0 ? fmtCFull(v) : '—' },
     ];
     const unitBarData = unitBreakdown.map(u => ({ unit: u.unit.length > 14 ? u.unit.substring(0,14)+'…' : u.unit, employees: u.employees, rent: u.rent }));
     return (
@@ -1040,9 +1134,9 @@ const DashboardHome = () => {
             <Col xs={12} sm={8} md={6} key={u.unit}>
               <Card size="small" style={{ borderTop: '3px solid #1890ff' }} bodyStyle={{ padding: '10px 14px' }}>
                 <div style={{ fontSize: 11, color: '#595959', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>{u.unit}</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: '#1890ff' }}>{u.employees} <span style={{ fontSize: 12, color: '#8c8c8c', fontWeight: 400 }}>employees</span></div>
-                <div style={{ fontSize: 12, color: '#52c41a' }}>{fmtC(u.rent)} / month</div>
-                <div style={{ fontSize: 11, color: '#8c8c8c' }}>{u.employees > 0 ? `${fmtC(u.rent / u.employees)} / head` : '—'}</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: '#1890ff' }}>{u.capacity > 0 ? `${u.occupancyPct}%` : '—'} <span style={{ fontSize: 12, color: '#8c8c8c', fontWeight: 400 }}>occupancy</span></div>
+                <div style={{ fontSize: 12, color: '#595959' }}>{u.occupied}/{u.capacity} beds · {u.vacant} vacant</div>
+                <div style={{ fontSize: 12, color: '#52c41a' }}>{fmtC(u.rent)} / month · {u.employees} employees</div>
               </Card>
             </Col>
           ))}
@@ -1088,6 +1182,11 @@ const DashboardHome = () => {
       key: 'overview',
       label: <span><DashboardOutlined /> Overview</span>,
       children: <OverviewContent />,
+    },
+    {
+      key: 'occupancy',
+      label: <span><ApartmentOutlined /> Occupancy &amp; Vacancy</span>,
+      children: <OccupancyContent />,
     },
     {
       key: 'workforce',
@@ -1168,7 +1267,34 @@ const DashboardHome = () => {
         </Space>
       </div>
 
+      {/* ── How the figures are calculated ── */}
+      <Collapse
+        size="small"
+        style={{ marginBottom: 12, background: '#fff' }}
+        items={[{
+          key: 'defs',
+          label: <Space><InfoCircleOutlined style={{ color: '#1890ff' }} /><Text style={{ fontSize: 12 }}>How these figures are calculated</Text></Space>,
+          children: (
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#595959' }}>
+              <li><b>Occupancy %</b> = occupied beds ÷ total bed capacity of rooms in active residences. Room capacity is set on each room (Residences → Floors &amp; Rooms).</li>
+              <li><b>Vacant</b> is counted per room: capacity − occupied. Residences without rooms set up are listed separately and are not in the occupancy %.</li>
+              <li><b>Room allocated</b> = active employee holding a bed. <b>Residence, no room</b> = linked to a residence's agreement but no room assigned yet. <b>Not allocated</b> = neither. These three add up to active employees.</li>
+              <li><b>Monthly rent</b> = rent of active agreements. Department/unit rent splits each agreement's rent equally across its occupants, so the totals add up to the real rent bill.</li>
+              <li><b>Advance locked</b> = advances on active agreements. <b>Refund outstanding</b> = for vacated agreements, (due back − landlord deductions) − amounts received. Vacating agreements are shown as <b>upcoming</b>, not pending.</li>
+            </ul>
+          ),
+        }]}
+      />
+
       {/* ── Alert banners ── */}
+      {bedsHeldByInactive > 0 && (
+        <Alert
+          type="error" showIcon closable
+          message={<><strong>{bedsHeldByInactive} bed{bedsHeldByInactive > 1 ? 's are' : ' is'}</strong> still held by inactive employees — vacate them so occupancy is correct</>}
+          action={<Button size="small" danger onClick={() => navigate('/rooms')}>Review</Button>}
+          style={{ marginBottom: 8 }}
+        />
+      )}
       {pastDue > 0 && (
         <Alert
           type="error" showIcon closable
@@ -1184,69 +1310,47 @@ const DashboardHome = () => {
           style={{ marginBottom: 8 }}
         />
       )}
-      {totalScheduledToVacate > 0 && (
+      {residencesWithoutStructure > 0 && (
         <Alert
           type="info" showIcon closable
-          message={<><strong>{totalScheduledToVacate} agreement{totalScheduledToVacate > 1 ? 's' : ''}</strong> scheduled to vacate — advance refunds may be pending</>}
-          action={<Button size="small" onClick={() => navigate('/agreements?filter=scheduledToVacate')}>View</Button>}
+          message={<><strong>{residencesWithoutStructure} active residence{residencesWithoutStructure > 1 ? 's have' : ' has'}</strong> no floors/rooms set up — their beds are not yet counted in occupancy</>}
+          action={<Button size="small" onClick={() => setActiveTab('occupancy')}>See which</Button>}
           style={{ marginBottom: 16 }}
         />
       )}
 
-      {/* ── KPI ROW 1: Properties ── */}
-      <SLabel>Properties &amp; Residences</SLabel>
+      {/* ── KPI ROW 1: Occupancy (room level) ── */}
+      <SLabel>Occupancy (room level)</SLabel>
       <Row gutter={[10, 10]} style={{ marginBottom: 16 }}>
         <Col xs={12} sm={8} md={4}>
-          <KCard title="Total Properties" value={totalProperties} color="#262626"
-            sub={`${activeResidences} active · ${inactiveResidences} inactive`} />
-        </Col>
-        <Col xs={12} sm={8} md={4}>
-          <KCard title="Active Residences" value={activeResidences} color="#1890ff"
-            sub={inactiveResidences > 0 ? `${inactiveResidences} inactive` : 'All active'} />
-        </Col>
-        <Col xs={12} sm={8} md={4}>
-          <KCard title="Occupied" value={occupiedResidences} color="#52c41a"
-            sub={`${utilizationPct}% utilization`} />
-        </Col>
-        <Col xs={12} sm={8} md={4}>
-          <KCard title="Vacant Properties" value={vacantResidences}
-            color={vacantResidences > 3 ? '#faad14' : '#52c41a'}
-            sub="Click to view details"
-            clickFn={() => openAvailModal('properties')} />
-        </Col>
-        <Col xs={12} sm={8} md={4}>
-          <KCard title="Total Rooms" value={totalRooms} color="#722ed1"
-            sub={`${occupiedRooms} occupied`} />
-        </Col>
-        <Col xs={12} sm={8} md={4}>
-          <KCard title="Vacant Rooms" value={vacantRooms}
-            color={vacantRooms > 5 ? '#faad14' : '#52c41a'}
-            sub="Click to view details"
-            clickFn={() => openAvailModal('rooms')} />
-        </Col>
-      </Row>
-
-      {/* ── Availability Summary Strip ── */}
-      <SLabel>Bed Availability</SLabel>
-      <Row gutter={[10, 10]} style={{ marginBottom: 16 }}>
-        <Col xs={12} sm={8} md={6}>
-          <KCard title="Total Beds" value={totalBeds} color="#262626"
-            sub={`${bedOccupancyPct}% occupied`} />
-        </Col>
-        <Col xs={12} sm={8} md={6}>
-          <KCard title="Occupied Beds" value={occupiedBeds} color="#1890ff"
-            sub="Currently allocated" />
-        </Col>
-        <Col xs={12} sm={8} md={6}>
-          <KCard title="Available Beds" value={availableBeds}
-            color={availableBeds > 0 ? '#52c41a' : '#f5222d'}
-            sub="Click to see bed-level detail"
-            clickFn={() => openAvailModal('beds')} />
-        </Col>
-        <Col xs={12} sm={8} md={6}>
           <KCard title="Bed Occupancy" value={bedOccupancyPct} suffix="%"
             color={bedOccupancyPct >= 80 ? '#52c41a' : bedOccupancyPct >= 60 ? '#faad14' : '#f5222d'}
             sub={`${occupiedBeds} of ${totalBeds} beds filled`} />
+        </Col>
+        <Col xs={12} sm={8} md={4}>
+          <KCard title="Bed Capacity" value={totalBeds} color="#262626"
+            sub={`${totalRooms} rooms configured`} />
+        </Col>
+        <Col xs={12} sm={8} md={4}>
+          <KCard title="Vacant Beds" value={availableBeds}
+            color={availableBeds > 0 ? '#52c41a' : '#8c8c8c'}
+            sub={`In ${roomsWithVacancy} rooms — click for detail`}
+            clickFn={() => openAvailModal('rooms')} />
+        </Col>
+        <Col xs={12} sm={8} md={4}>
+          <KCard title="Rooms Full / Partial / Vacant" value={`${fullRooms} / ${partialRooms} / ${vacantRooms}`} color="#722ed1"
+            sub="Click to view by room" clickFn={() => setActiveTab('occupancy')} />
+        </Col>
+        <Col xs={12} sm={8} md={4}>
+          <KCard title="Residences" value={activeResidences} color="#1890ff"
+            sub={`${occupiedResidences} occupied · ${vacantResidences} empty · ${inactiveResidences} inactive`}
+            clickFn={() => openAvailModal('properties')} />
+        </Col>
+        <Col xs={12} sm={8} md={4}>
+          <KCard title="Room Setup Pending" value={residencesWithoutStructure}
+            color={residencesWithoutStructure > 0 ? '#faad14' : '#52c41a'}
+            sub={residencesWithoutStructure > 0 ? 'Residences without rooms' : 'All residences set up'}
+            clickFn={() => setActiveTab('occupancy')} />
         </Col>
       </Row>
 
@@ -1254,19 +1358,22 @@ const DashboardHome = () => {
       <SLabel>Workforce</SLabel>
       <Row gutter={[10, 10]} style={{ marginBottom: 16 }}>
         <Col xs={12} sm={8} md={4}>
-          <KCard title="Total Employees" value={totalEmployees} color="#262626" />
+          <KCard title="Active Employees" value={activeEmployees} color="#262626"
+            sub={`${totalEmployees} total incl. inactive`} />
         </Col>
         <Col xs={12} sm={8} md={4}>
-          <KCard title="Active" value={activeEmployees} color="#52c41a" />
+          <KCard title="Room Allocated" value={employeesWithRoom} color="#1890ff"
+            sub={`${activeEmployees > 0 ? Math.round((employeesWithRoom / activeEmployees) * 100) : 0}% of active`} />
         </Col>
         <Col xs={12} sm={8} md={4}>
-          <KCard title="Allocated" value={allocatedEmployees} color="#1890ff"
-            sub={`of ${activeEmployees} active`} />
+          <KCard title="Residence, No Room" value={employeesResidenceOnly}
+            color={employeesResidenceOnly > 0 ? '#faad14' : '#52c41a'}
+            sub="Assign a room" />
         </Col>
         <Col xs={12} sm={8} md={4}>
-          <KCard title="Unallocated" value={unallocatedEmployees}
-            color={unallocatedEmployees > 0 ? '#faad14' : '#52c41a'}
-            sub="Active, no residence" />
+          <KCard title="Not Allocated" value={unallocatedEmployees}
+            color={unallocatedEmployees > 0 ? '#f5222d' : '#52c41a'}
+            sub="Active, no accommodation" />
         </Col>
         <Col xs={12} sm={8} md={4}>
           <KCard title="Inactive" value={inactiveEmployees} color="#8c8c8c" />
@@ -1282,32 +1389,21 @@ const DashboardHome = () => {
       <SLabel>Financials</SLabel>
       <Row gutter={[10, 10]} style={{ marginBottom: 24 }}>
         <Col xs={12} sm={8} md={4}>
-          <Card size="small" style={{ borderTop: '3px solid #52c41a', height: '100%' }} bodyStyle={{ padding: '12px 16px' }}>
-            <div style={{ fontSize: 12, color: '#595959' }}>Monthly Rent</div>
-            <div style={{ fontSize: 19, fontWeight: 700, color: '#52c41a' }}>{fmtC(totalMonthlyRent)}</div>
-            <div style={{ fontSize: 11, color: '#8c8c8c' }}>Active agreements</div>
-          </Card>
+          <KCard title="Monthly Rent" value={fmtC(totalMonthlyRent)} color="#52c41a" sub="Active agreements" />
         </Col>
         <Col xs={12} sm={8} md={4}>
-          <Card size="small" style={{ borderTop: '3px solid #E87103', height: '100%' }} bodyStyle={{ padding: '12px 16px' }}>
-            <div style={{ fontSize: 12, color: '#595959' }}>Advance Locked</div>
-            <div style={{ fontSize: 19, fontWeight: 700, color: '#E87103' }}>{fmtC(totalAdvanceLocked)}</div>
-            <div style={{ fontSize: 11, color: '#8c8c8c' }}>Security deposits</div>
-          </Card>
+          <KCard title="Advance Locked" value={fmtC(totalAdvanceLocked)} color="#E87103" sub="Deposits on active agreements" />
         </Col>
         <Col xs={12} sm={8} md={4}>
-          <Card size="small" style={{ borderTop: `3px solid ${totalAdvancePending > 0 ? '#f5222d' : '#52c41a'}`, height: '100%' }} bodyStyle={{ padding: '12px 16px' }}>
-            <div style={{ fontSize: 12, color: '#595959' }}>Advance Pending</div>
-            <div style={{ fontSize: 19, fontWeight: 700, color: totalAdvancePending > 0 ? '#f5222d' : '#52c41a' }}>{fmtC(totalAdvancePending)}</div>
-            <div style={{ fontSize: 11, color: '#8c8c8c' }}>Refunds not yet received</div>
-          </Card>
+          <KCard title="Refund Outstanding" value={fmtC(totalAdvancePending)}
+            color={totalAdvancePending > 0 ? '#f5222d' : '#52c41a'}
+            sub={totalAdvancePending > 0 ? `${refundCasesOpen} vacated — click to follow up` : 'None pending'}
+            clickFn={() => navigate('/refunds')} />
         </Col>
         <Col xs={12} sm={8} md={4}>
-          <Card size="small" style={{ borderTop: '3px solid #1890ff', height: '100%' }} bodyStyle={{ padding: '12px 16px' }}>
-            <div style={{ fontSize: 12, color: '#595959' }}>Advance Received</div>
-            <div style={{ fontSize: 19, fontWeight: 700, color: '#1890ff' }}>{fmtC(totalNetReceived)}</div>
-            <div style={{ fontSize: 11, color: '#8c8c8c' }}>Total refunds collected</div>
-          </Card>
+          <KCard title="Refund Received" value={fmtC(totalNetReceived)} color="#1890ff"
+            sub={totalRefundUpcoming > 0 ? `${fmtC(totalRefundUpcoming)} upcoming from vacating` : 'Recorded receipts'}
+            clickFn={() => navigate('/refunds')} />
         </Col>
         <Col xs={12} sm={8} md={4}>
           <KCard title="Past Due Renewals" value={pastDue}
@@ -1360,8 +1456,13 @@ const DashboardHome = () => {
                               {p.address && <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>{p.address}</Text>}
                             </div>
                             <Space size="small">
-                              <Tag color="green">{p.vacantBeds} vacant beds</Tag>
-                              <Tag color="blue">{p.totalBeds} total</Tag>
+                              {p.structureConfigured ? (
+                                <>
+                                  <Tag color="green">{p.vacantBeds} vacant beds</Tag>
+                                  <Tag color="blue">{p.totalBeds} total · {p.occupancyPct}% occupied</Tag>
+                                </>
+                              ) : <Tag color="warning">Room setup pending</Tag>}
+                              <Button size="small" type="link" onClick={() => navigate(`/residences?view=${p.residence_id}`)}>Open</Button>
                             </Space>
                           </Space>
                           {p.owner && <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 4 }}>Owner: {p.owner} {p.owner_contact ? `· ${p.owner_contact}` : ''}</div>}
@@ -1375,8 +1476,11 @@ const DashboardHome = () => {
                   p.rooms.filter(r => r.vacantBeds > 0).map(r => (
                     <Card key={`${p.residence_id}-${r.room_number}`} size="small" style={{ marginBottom: 8, borderLeft: '4px solid #faad14' }}>
                       <Space style={{ justifyContent: 'space-between', width: '100%' }}>
-                        <Text strong>{p.name} — Room {r.room_number}{r.floor_number ? ` (${r.floor_number})` : ''}</Text>
-                        <Tag color="orange">{r.vacantBeds} vacant of {r.totalBeds}</Tag>
+                        <Text strong>{p.name} — {r.floor_number ? `${r.floor_number} · ` : ''}Room {r.room_number}</Text>
+                        <Space size="small">
+                          <Tag>{p.unit}</Tag>
+                          <Tag color="orange">{r.vacantBeds} vacant of {r.totalBeds}</Tag>
+                        </Space>
                       </Space>
                     </Card>
                   ))
