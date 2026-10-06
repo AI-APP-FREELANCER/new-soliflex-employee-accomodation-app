@@ -22,10 +22,12 @@ import {
   Tabs,
   Divider,
 } from 'antd';
-import { PlusOutlined, EditOutlined, EyeOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined, PictureOutlined, UploadOutlined, DeleteOutlined, FolderOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, EyeOutlined, ApartmentOutlined, DownloadOutlined, FilePdfOutlined, FileExcelOutlined, SearchOutlined, PictureOutlined, UploadOutlined, DeleteOutlined, FolderOutlined } from '@ant-design/icons';
 import { residenceAPI, agreementAPI, employeeAPI } from '../services/api';
 import api from '../services/api';
 import DocumentsPanel from './DocumentsPanel';
+import ResidenceStructure from './ResidenceStructure';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { exportToPDF, exportTableToExcel } from '../utils/exportUtils';
 import { formatDateForDisplay } from '../utils/dateUtils';
 import dayjs from 'dayjs';
@@ -35,6 +37,12 @@ const { Option } = Select;
 
 const Residences = () => {
   const [residences, setResidences] = useState([]);
+  const location = useLocation();
+  const navigate = useNavigate();
+  // Residence whose floors & rooms are open; deep-linkable via /residences?view=<id>
+  const structureId = new URLSearchParams(location.search).get('view');
+  const openStructure = (id) => navigate(`/residences?view=${encodeURIComponent(id)}`);
+  const closeStructure = () => navigate('/residences');
   const [loading, setLoading] = useState(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [formVisible, setFormVisible] = useState(false);
@@ -430,6 +438,13 @@ const Residences = () => {
           </Button>
           <Button
             type="link"
+            icon={<ApartmentOutlined />}
+            onClick={() => openStructure(record.residence_id)}
+          >
+            Floors &amp; Rooms
+          </Button>
+          <Button
+            type="link"
             icon={<EditOutlined />}
             onClick={() => handleEdit(record)}
           >
@@ -613,6 +628,9 @@ const Residences = () => {
                     <div>
                       <Text strong>House Count: </Text>
                       <Text>{residence.residence_house_count || 0}</Text>
+                      <Button type="link" size="small" icon={<ApartmentOutlined />} onClick={() => openStructure(residence.residence_id)}>
+                        Floors &amp; Rooms
+                      </Button>
                     </div>
                     <div>
                       <Text strong>Status: </Text>
@@ -672,6 +690,18 @@ const Residences = () => {
           </div>
         )}
       </div>
+
+      {/* Floors & Rooms Drawer — building → floor → room → employees */}
+      <Drawer
+        title="Floors & Rooms"
+        placement="right"
+        width={isMobile ? '100%' : 1100}
+        open={!!structureId}
+        onClose={closeStructure}
+        destroyOnClose
+      >
+        {structureId && <ResidenceStructure residenceId={structureId} />}
+      </Drawer>
 
       {/* View Details Drawer */}
       <Drawer

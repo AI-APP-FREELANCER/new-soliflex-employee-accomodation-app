@@ -9,6 +9,9 @@ import {
   LogoutOutlined,
   DashboardOutlined,
   FallOutlined,
+  ApartmentOutlined,
+  BankOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -16,7 +19,10 @@ import Residences from './Residences';
 import Agreements from './Agreements';
 import Employees from './Employees';
 import DashboardHome from './DashboardHome';
-import BedManagement from './BedManagement';
+import RoomAllocation from './RoomAllocation';
+import AdvanceRefunds from './AdvanceRefunds';
+import UnitSettings from './UnitSettings';
+import AlertsBell from './AlertsBell';
 import Attrition from './Attrition';
 import { useResponsive } from '../utils/useResponsive';
 import '../App.css';
@@ -37,7 +43,9 @@ const Dashboard = () => {
     if (pathname.startsWith('/agreements')) return 'agreements';
     if (pathname.startsWith('/employees'))  return 'employees';
     if (pathname.startsWith('/residences')) return 'residences';
-    if (pathname.startsWith('/beds'))       return 'beds';
+    if (pathname.startsWith('/rooms') || pathname.startsWith('/beds')) return 'rooms';
+    if (pathname.startsWith('/refunds'))    return 'refunds';
+    if (pathname.startsWith('/units'))      return 'units';
     if (pathname.startsWith('/analytics'))  return 'analytics';
     if (pathname.startsWith('/attrition'))  return 'attrition';
     return 'dashboard';
@@ -75,14 +83,19 @@ const Dashboard = () => {
       label: 'Residences',
     },
     {
-      key: 'beds',
-      icon: <HomeOutlined />,
-      label: 'Bed Management',
+      key: 'rooms',
+      icon: <ApartmentOutlined />,
+      label: 'Rooms & Allocation',
     },
     {
       key: 'agreements',
       icon: <FileTextOutlined />,
       label: 'Agreements',
+    },
+    {
+      key: 'refunds',
+      icon: <BankOutlined />,
+      label: 'Advance Refunds',
     },
     {
       key: 'employees',
@@ -93,6 +106,11 @@ const Dashboard = () => {
       key: 'attrition',
       icon: <FallOutlined />,
       label: 'Attrition & Retention',
+    },
+    {
+      key: 'units',
+      icon: <AppstoreOutlined />,
+      label: 'Units',
     },
   ];
 
@@ -115,7 +133,9 @@ const Dashboard = () => {
     const routeMap = {
       'dashboard':  '/dashboard',
       'residences': '/residences',
-      'beds':       '/beds',
+      'rooms':      '/rooms',
+      'refunds':    '/refunds',
+      'units':      '/units',
       'agreements': '/agreements',
       'employees':  '/employees',
       'analytics':  '/analytics',
@@ -130,8 +150,12 @@ const Dashboard = () => {
     switch (selectedKey) {
       case 'residences':
         return <Residences />;
-      case 'beds':
-        return <BedManagement />;
+      case 'rooms':
+        return <RoomAllocation />;
+      case 'refunds':
+        return <AdvanceRefunds />;
+      case 'units':
+        return <UnitSettings />;
       case 'agreements':
         return <Agreements />;
       case 'employees':
@@ -258,6 +282,7 @@ const Dashboard = () => {
             gap: responsive.isMobile ? '8px' : responsive.isTablet ? '12px' : '16px',
             flexWrap: 'wrap',
           }}>
+            <AlertsBell compact={responsive.isMobile} />
             {!responsive.isMobile && (
               <span style={{ color: '#262626', fontWeight: 500, fontSize: responsive.isTablet ? '13px' : '14px' }}>
                 Welcome, {user?.username || 'Admin'}

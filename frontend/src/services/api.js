@@ -175,6 +175,42 @@ export const bedAPI = {
     api.put(`/beds/allocations/${allocId}`, data),
 };
 
+// Room structure & room-level allocation APIs
+export const roomAPI = {
+  getStructure: (residenceId) => api.get(`/rooms/structure/${encodeURIComponent(residenceId)}`),
+  getVacancy: (params = {}) => api.get('/rooms/vacancy', { params }),
+  getHistory: (params = {}) => api.get('/rooms/history', { params }),
+  create: (data) => api.post('/rooms', data),
+  update: (roomId, data) => api.put(`/rooms/${encodeURIComponent(roomId)}`, data),
+  remove: (roomId) => api.delete(`/rooms/${encodeURIComponent(roomId)}`),
+  allocate: (data) => api.post('/rooms/allocate', data),
+  transfer: (data) => api.post('/rooms/transfer', data),
+  vacate: (data) => api.post('/rooms/vacate', data),
+};
+
+// Advance refund management APIs
+export const refundAPI = {
+  getAll: () => api.get('/refunds'),
+  getById: (agreementId) => api.get(`/refunds/${encodeURIComponent(agreementId)}`),
+  setDeductions: (agreementId, data) => api.put(`/refunds/${encodeURIComponent(agreementId)}/deductions`, data),
+  setFollowUp: (agreementId, data) => api.put(`/refunds/${encodeURIComponent(agreementId)}/follow-up`, data),
+  addReceipt: (agreementId, data) => api.post(`/refunds/${encodeURIComponent(agreementId)}/receipts`, data),
+  deleteReceipt: (agreementId, receiptId) => api.delete(`/refunds/${encodeURIComponent(agreementId)}/receipts/${receiptId}`),
+};
+
+// Unit master APIs
+export const unitAPI = {
+  getAll: () => api.get('/units'),
+  create: (data) => api.post('/units', data),
+  update: (id, data) => api.put(`/units/${id}`, data),
+  mapValue: (id, fromValue) => api.post(`/units/${id}/map`, { from_value: fromValue }),
+};
+
+// Alerts (computed live on the server)
+export const alertAPI = {
+  getAll: () => api.get('/alerts'),
+};
+
 // Analytics/Reporting APIs
 export const analyticsAPI = {
   getOccupancy: () => api.get('/analytics/occupancy'),

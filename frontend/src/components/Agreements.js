@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Table, Card, Button, Input, InputNumber, Tag, Space, Select, DatePicker, message, Modal, Form, Row, Col, Typography, Empty, Popconfirm, Badge, Drawer } from 'antd';
 import { SearchOutlined, PlusOutlined, EditOutlined, ReloadOutlined, EyeOutlined, DeleteOutlined, UploadOutlined, CalendarOutlined, DollarOutlined, CloseCircleOutlined, FilePdfOutlined, FolderOpenOutlined, SyncOutlined } from '@ant-design/icons';
-import { agreementAPI, residenceAPI } from '../services/api';
+import { agreementAPI, residenceAPI, unitAPI } from '../services/api';
 import apiClient from '../services/api';
 import DocumentsPanel from './DocumentsPanel';
 import dayjs from 'dayjs';
@@ -21,6 +21,7 @@ const Agreements = () => {
   const [renewalFilter, setRenewalFilter] = useState(null);
   
   const [residences, setResidences] = useState([]);
+  const [units, setUnits] = useState([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingAgreement, setEditingAgreement] = useState(null);
   const [form] = Form.useForm();
@@ -94,6 +95,12 @@ const Agreements = () => {
       setResidences(data);
     } catch (error) {
       // Failed to fetch residences - handled silently
+    }
+    try {
+      const res = await unitAPI.getAll();
+      setUnits((res.data?.units || []).filter(u => u.is_active));
+    } catch (error) {
+      // Unit list unavailable - the unit field will be empty
     }
   };
 
@@ -350,7 +357,10 @@ const Agreements = () => {
     setEditingAgreement(record);
     form.setFieldsValue({
       ...record,
-      agreement_renewal_due_date: record.agreement_renewal_due_date ? dayjs(record.agreement_renewal_due_date) : null
+      agreement_renewal_due_date: record.agreement_renewal_due_date ? dayjs(record.agreement_renewal_due_date) : null,
+      agreement_possesion_date: record.agreement_possesion_date ? dayjs(record.agreement_possesion_date) : null,
+      agreement_employee_unit: units.find(u => u.unit_name.trim().toLowerCase() === String(record.agreement_employee_unit || '').trim().toLowerCase())?.unit_name
+        || record.agreement_employee_unit || undefined,
     });
     setIsModalVisible(true);
   };
@@ -360,6 +370,12 @@ const Agreements = () => {
       const values = await form.validateFields();
       if (values.agreement_renewal_due_date) {
         values.agreement_renewal_due_date = values.agreement_renewal_due_date.format('YYYY-MM-DD');
+      }
+      if (values.agreement_possesion_date) {
+        values.agreement_possesion_date = values.agreement_possesion_date.format('YYYY-MM-DD');
+      }
+      if (values.agreement_advance_amount === '' || values.agreement_advance_amount === undefined) {
+        delete values.agreement_advance_amount;
       }
 
       if (editingAgreement) {
@@ -374,7 +390,8 @@ const Agreements = () => {
       form.resetFields();
       fetchAgreements();
     } catch (error) {
-      message.error('Operation failed');
+      if (error?.errorFields) return; // form validation message already shown
+      message.error(error?.response?.data?.error || 'Operation failed');
     }
   };
 
@@ -806,6 +823,22 @@ const Agreements = () => {
                <Form.Item name="agreement_renewal_due_date" label="Renewal Date" rules={[{ required: true }]}>
                  <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
                </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="agreement_employee_unit" label="Unit" rules={[{ required: true, message: 'Select the unit' }]}
+                extra="From the standard unit list (Units page)">
+                <Select showSearch placeholder="Select unit" options={units.map(u => ({ value: u.unit_name, label: u.unit_name }))} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="agreement_advance_amount" label="Advance Amount">
+                <Input type="number" prefix="₹" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="agreement_possesion_date" label="Possession Date">
+                <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+              </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item name="agreement_status" label="Status">

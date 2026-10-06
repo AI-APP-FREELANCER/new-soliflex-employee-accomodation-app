@@ -3,6 +3,7 @@ const router  = express.Router();
 const { authenticateToken } = require('../middleware/auth');
 const excelReader = require('../data/excelReader');
 const pool = require('../data/db');
+const refundService = require('../data/refundService');
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
@@ -33,6 +34,19 @@ const parseCurrency = (val) => {
   const n = parseFloat(String(val).replace(/[^\d.-]/g, ''));
   return isNaN(n) ? 0 : n;
 };
+
+// ─── Unit standardisation ─────────────────────────────────────────────────────
+// Agreements may only use units from unit_master; the standard spelling is stored.
+async function standardiseUnit(data) {
+  if (data.agreement_employee_unit === undefined) return null;
+  const raw = String(data.agreement_employee_unit || '').trim();
+  if (!raw) { data.agreement_employee_unit = null; return null; }
+  const { rows } = await pool.query(
+    'SELECT unit_name FROM unit_master WHERE LOWER(TRIM(unit_name)) = LOWER($1) AND is_active', [raw]);
+  if (!rows.length) return `Unit "${raw}" is not in the standard unit list. Add it under Settings → Units first.`;
+  data.agreement_employee_unit = rows[0].unit_name;
+  return null;
+}
 
 // ─── Agreement enrichment ──────────────────────────────────────────────────────
 
@@ -285,6 +299,8 @@ router.post('/', async (req, res) => {
       data.agreement_id = `agreement_${String(maxId + 1).padStart(3, '0')}`;
     }
     if (!data.agreement_status) data.agreement_status = 'active';
+    const unitError = await standardiseUnit(data);
+    if (unitError) return res.status(400).json({ error: unitError });
     const newAgreement = await excelReader.addAgreement(data);
     res.status(201).json(newAgreement);
   } catch (err) {
@@ -298,17 +314,9 @@ router.put('/:id', async (req, res) => {
     const updates = { ...req.body };
     delete updates.agreement_id;
 
-    if (updates.agreement_maintenance_cut !== undefined) {
-      const agreements = await excelReader.getAgreements('all');
-      const agreement  = agreements.find(a => a.agreement_id === agreementId);
-      if (agreement) {
-        const advanceDueBack = parseFloat(updates.agreement_advance_due_back || agreement.agreement_advance_due_back || agreement.agreement_advance_amount || 0);
-        const maintenanceCut = parseFloat(updates.agreement_maintenance_cut);
-        if (maintenanceCut > advanceDueBack)
-          return res.status(400).json({ error: 'Maintenance cut cannot exceed advance due back amount' });
-        updates.agreement_advance_received = advanceDueBack - maintenanceCut;
-      }
-    }
+    // Refund amounts are recorded through /api/refunds (or /:id/process-refund), not plain edits.
+    const unitError = await standardiseUnit(updates);
+    if (unitError) return res.status(400).json({ error: unitError });
 
     if (updates.agreement_vacate_date) {
       const vd = dayjs(updates.agreement_vacate_date);
@@ -410,45 +418,24 @@ router.post('/:id/renew', async (req, res) => {
   }
 });
 
+// "Process Refund": record the landlord's deductions and that the balance was received in full.
+// Partial receipts and follow-ups are handled by /api/refunds.
 router.post('/:id/process-refund', async (req, res) => {
   try {
     const { agreement_maintenance_cut, agreement_deduction_electricity, agreement_deduction_water, agreement_deduction_other } = req.body;
-
-    const agreements = await excelReader.getAgreements('all');
-    const agreement  = agreements.find(a => a.agreement_id === req.params.id);
-    if (!agreement) return res.status(404).json({ error: 'Agreement not found' });
-
-    const advanceDueBack = parseFloat(agreement.agreement_advance_due_back || agreement.agreement_advance_amount || 0);
-    const hasBreakdown   = agreement_deduction_electricity != null || agreement_deduction_water != null || agreement_deduction_other != null;
-
-    let maintenanceCut, electric = 0, water = 0, other = 0;
-    if (hasBreakdown) {
-      electric       = Math.max(0, parseFloat(agreement_deduction_electricity) || 0);
-      water          = Math.max(0, parseFloat(agreement_deduction_water) || 0);
-      other          = Math.max(0, parseFloat(agreement_deduction_other) || 0);
-      maintenanceCut = electric + water + other;
-    } else {
-      if (agreement_maintenance_cut == null)
-        return res.status(400).json({ error: 'Enter deduction amounts (electricity, water, other) or maintenance cut total' });
-      maintenanceCut = parseFloat(agreement_maintenance_cut);
-      if (isNaN(maintenanceCut) || maintenanceCut < 0)
-        return res.status(400).json({ error: 'Maintenance cut must be a valid non-negative number' });
+    const hasBreakdown = agreement_deduction_electricity != null || agreement_deduction_water != null || agreement_deduction_other != null;
+    if (!hasBreakdown && agreement_maintenance_cut == null) {
+      return res.status(400).json({ error: 'Enter deduction amounts (electricity, water, other) or maintenance cut total' });
     }
-
-    if (maintenanceCut > advanceDueBack)
-      return res.status(400).json({ error: 'Total deductions cannot exceed advance due back amount' });
-
-    const updated = await excelReader.updateAgreement(req.params.id, {
-      agreement_advance_due_back:      advanceDueBack,
-      agreement_maintenance_cut:       maintenanceCut,
-      agreement_deduction_electricity: electric,
-      agreement_deduction_water:       water,
-      agreement_deduction_other:       other,
-      agreement_advance_received:      advanceDueBack - maintenanceCut,
-    });
-    if (!updated) return res.status(404).json({ error: 'Agreement not found' });
+    const deductions = hasBreakdown
+      ? { electricity: agreement_deduction_electricity, water: agreement_deduction_water, other: agreement_deduction_other }
+      : { other: agreement_maintenance_cut };
+    await refundService.settleInFull(req.params.id, deductions, req.user?.username);
+    const agreements = await excelReader.getAgreements('all');
+    const updated = agreements.find(a => a.agreement_id === req.params.id);
     res.json(enrichAgreement(updated));
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: 'Internal server error' });
   }
 });

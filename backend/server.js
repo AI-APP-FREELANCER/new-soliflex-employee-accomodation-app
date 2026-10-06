@@ -22,6 +22,10 @@ const employeeRoutes = require('./routes/employee');
 const analyticsRoutes = require('./routes/analytics');
 const filesRoutes     = require('./routes/files');
 const bedsRoutes      = require('./routes/beds');
+const roomsRoutes     = require('./routes/rooms');
+const refundsRoutes   = require('./routes/refunds');
+const unitsRoutes     = require('./routes/units');
+const alertsRoutes    = require('./routes/alerts');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/residence', residenceRoutes);
@@ -30,16 +34,24 @@ app.use('/api/employee', employeeRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/files', filesRoutes);
 app.use('/api/beds', bedsRoutes);
+app.use('/api/rooms', roomsRoutes);
+app.use('/api/refunds', refundsRoutes);
+app.use('/api/units', unitsRoutes);
+app.use('/api/alerts', alertsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Soliflex Quarters Manager API is running' });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  // Only log in development or if explicitly enabled
-  if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SERVER_LOGS === 'true') {
-    console.log(`Server is running on port ${PORT}`);
-  }
+// Start listening only after startup migrations have finished, so routes never
+// hit a table or column that is still being created.
+require('./data/db').ready.then(() => {
+  app.listen(PORT, '0.0.0.0', () => {
+    // Only log in development or if explicitly enabled
+    if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SERVER_LOGS === 'true') {
+      console.log(`Server is running on port ${PORT}`);
+    }
+  });
 });
 
